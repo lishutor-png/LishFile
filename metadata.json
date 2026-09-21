@@ -1,0 +1,7 @@
+{
+  "name": "File Manager +",
+  "description": "Secure offline file manager with categorized visual dashboard, AES-256 encryption, password and biometric lock, local P2P transfer, and storage tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
