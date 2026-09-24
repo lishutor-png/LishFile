@@ -157,6 +157,25 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
         refreshCurrentDir()
         refreshStorageStats()
         refreshCategoryStats()
+
+        // Observe showHiddenFiles changes and react immediately
+        viewModelScope.launch {
+            preferences.showHiddenFiles.collect { showHidden ->
+                // If user is currently inside a hidden folder and turns off hidden files,
+                // navigate back to non-hidden parent
+                if (!showHidden && FileUtils.isHiddenOrInHiddenFolder(_currentDir.value)) {
+                    var parent = _currentDir.value.parentFile
+                    while (parent != null && FileUtils.isHiddenOrInHiddenFolder(parent)) {
+                        parent = parent.parentFile
+                    }
+                    if (parent != null && parent.exists()) {
+                        _currentDir.value = parent
+                    }
+                }
+                refreshCurrentDir()
+                _categoryOverviewStats.value = computeCategoryStats(_categoryFilesMap.value, showHidden)
+            }
+        }
     }
 
     fun refreshAll() {
@@ -264,13 +283,13 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
             val rawFiles = dir.listFiles() ?: emptyArray()
 
             val fileItems = rawFiles
-                .filter { showHidden || (!it.isHidden && !it.name.startsWith(".")) }
+                .filter { showHidden || !FileUtils.isHiddenOrInHiddenFolder(it) }
                 .map { file ->
                     FileItem(
                         file = file,
                         fileType = FileUtils.getFileType(file),
                         isLocked = preferences.isFolderLocked(file.absolutePath),
-                        isHidden = file.isHidden || file.name.startsWith(".")
+                        isHidden = FileUtils.isHiddenOrInHiddenFolder(file)
                     )
                 }
 
@@ -415,7 +434,7 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
                     file = file,
                     fileType = FileUtils.getFileType(file),
                     isLocked = preferences.isFolderLocked(file.absolutePath),
-                    isHidden = file.isHidden || file.name.startsWith(".")
+                    isHidden = FileUtils.isHiddenOrInHiddenFolder(file)
                 )
             }
             _isDeepSearching.value = false
@@ -447,6 +466,7 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun getFilteredAndSortedFiles(): List<FileItem> {
+        val showHidden = preferences.showHiddenFiles.value
         val query = _searchQuery.value.trim().lowercase()
         val cat = _selectedCategory.value
         val sizeF = _sizeFilter.value
@@ -459,6 +479,11 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
             _deepSearchResults.value
         } else {
             _allFilesInCurrentDir.value
+        }
+
+        // Strict filter for hidden files and files within hidden directories (.vd, .thumbnails, etc.)
+        if (!showHidden) {
+            list = list.filter { !it.isHidden && !FileUtils.isHiddenOrInHiddenFolder(it.file) }
         }
 
         if (query.isNotEmpty()) {
@@ -501,6 +526,40 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
         return list.sortedWith(comparator)
     }
 
+    private fun computeCategoryStats(
+        filesMap: Map<ViewCategory, List<FileItem>>,
+        showHidden: Boolean
+    ): CategoryOverviewStats {
+        fun filterItems(items: List<FileItem>?): List<FileItem> {
+            val list = items ?: emptyList()
+            return if (showHidden) list else list.filter { !it.isHidden && !FileUtils.isHiddenOrInHiddenFolder(it.file) }
+        }
+        val images = filterItems(filesMap[ViewCategory.IMAGES])
+        val videos = filterItems(filesMap[ViewCategory.VIDEOS])
+        val audio = filterItems(filesMap[ViewCategory.AUDIO])
+        val docs = filterItems(filesMap[ViewCategory.DOCUMENTS])
+        val archives = filterItems(filesMap[ViewCategory.ARCHIVES])
+        val apks = filterItems(filesMap[ViewCategory.APKS])
+        val downloads = filterItems(filesMap[ViewCategory.DOWNLOADS])
+
+        return CategoryOverviewStats(
+            imagesCount = images.size,
+            imagesSize = images.sumOf { it.size },
+            videosCount = videos.size,
+            videosSize = videos.sumOf { it.size },
+            audioCount = audio.size,
+            audioSize = audio.sumOf { it.size },
+            docsCount = docs.size,
+            docsSize = docs.sumOf { it.size },
+            archivesCount = archives.size,
+            archivesSize = archives.sumOf { it.size },
+            apksCount = apks.size,
+            apksSize = apks.sumOf { it.size },
+            downloadsCount = downloads.size,
+            downloadsSize = downloads.sumOf { it.size }
+        )
+    }
+
     // Storage & Category Statistics
     fun refreshStorageStats() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -522,9 +581,11 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch(Dispatchers.IO) {
             _isScanningCategories.value = true
             try {
-                val (stats, filesMap) = com.example.util.MediaScannerHelper.scanCategoryStatsFast(context)
-                _categoryOverviewStats.value = stats
+                val (rawStats, filesMap) = com.example.util.MediaScannerHelper.scanCategoryStatsFast(context)
                 _categoryFilesMap.value = filesMap
+                val showHidden = preferences.showHiddenFiles.value
+                val stats = computeCategoryStats(filesMap, showHidden)
+                _categoryOverviewStats.value = stats
                 preferences.saveCategoryStats(stats)
             } catch (e: Throwable) {
                 e.printStackTrace()

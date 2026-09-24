@@ -25,7 +25,7 @@ data class FileItem(
     val extension: String = file.extension.lowercase(),
     val fileType: FileType = FileType.OTHER,
     val isLocked: Boolean = false,
-    val isHidden: Boolean = file.isHidden || file.name.startsWith(".")
+    val isHidden: Boolean = com.example.util.FileUtils.isHiddenOrInHiddenFolder(file)
 )
 
 enum class SortBy {

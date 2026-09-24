@@ -58,6 +58,7 @@ import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -136,9 +137,30 @@ fun FileManagerScreen(
     val isScanningCategories by viewModel.isScanningCategories.collectAsState()
     val searchEntireStorage by viewModel.searchEntireStorage.collectAsState()
     val extensionFilter by viewModel.extensionFilter.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val showHiddenFiles by viewModel.preferences.showHiddenFiles.collectAsState()
+    val allFilesInCurrentDir by viewModel.allFilesInCurrentDir.collectAsState()
+    val categoryFilesMap by viewModel.categoryFilesMap.collectAsState()
+    val deepSearchResults by viewModel.deepSearchResults.collectAsState()
+    val sortBy by viewModel.sortBy.collectAsState()
+    val sortOrder by viewModel.sortOrder.collectAsState()
     val coroutineScope = rememberCoroutineScope()
 
-    val files = viewModel.getFilteredAndSortedFiles()
+    val files = remember(
+        allFilesInCurrentDir,
+        categoryFilesMap,
+        deepSearchResults,
+        selectedCategory,
+        searchQuery,
+        sortBy,
+        sortOrder,
+        sizeFilter,
+        extensionFilter,
+        showHiddenFiles,
+        isDeepSearching
+    ) {
+        viewModel.getFilteredAndSortedFiles()
+    }
 
     // Dialogs state
     var showCreateFolderDialog by remember { mutableStateOf(false) }
@@ -202,7 +224,12 @@ fun FileManagerScreen(
         }
     }
 
-    val searchQuery by viewModel.searchQuery.collectAsState()
+    LaunchedEffect(folderBuckets, selectedCategoryFolderPath) {
+        if (selectedCategoryFolderPath != null && folderBuckets.none { it.folder.absolutePath == selectedCategoryFolderPath }) {
+            selectedCategoryFolderPath = null
+        }
+    }
+
     val isSearching = searchQuery.isNotEmpty() || extensionFilter != null || searchEntireStorage
     val shouldShowExplorer = isBrowsingFolder || isSearching || selectedCategory != ViewCategory.ALL
     val hasStoragePermission = StoragePermissionHelper.hasStoragePermission(context)

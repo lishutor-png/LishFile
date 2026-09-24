@@ -291,6 +291,46 @@ object FileUtils {
         items
     }
 
+    /**
+     * Returns true if the file itself has a dot prefix, is marked hidden,
+     * or is located inside any parent directory with a dot prefix (e.g. .vd, .thumbnails, etc.).
+     */
+    fun isHiddenOrInHiddenFolder(file: File): Boolean {
+        // Fast path for file itself
+        if (file.name.isNotEmpty() && file.name.startsWith(".") && file.name != "." && file.name != "..") {
+            return true
+        }
+        if (file.isHidden) {
+            return true
+        }
+
+        // Check path components if it contains "/."
+        val absPath = file.absolutePath
+        if (absPath.contains("/.")) {
+            val segments = absPath.split("/")
+            for (segment in segments) {
+                if (segment.isNotEmpty() && segment.startsWith(".") && segment != "." && segment != "..") {
+                    return true
+                }
+            }
+        }
+
+        // Check parent directory hierarchy
+        var current: File? = file.parentFile
+        while (current != null) {
+            val name = current.name
+            if (name.isNotEmpty() && name.startsWith(".") && name != "." && name != "..") {
+                return true
+            }
+            if (name == "0" || name == "emulated" || name == "storage" || current.parentFile == null) {
+                break
+            }
+            current = current.parentFile
+        }
+
+        return false
+    }
+
     suspend fun searchFilesRecursively(
         root: File,
         query: String,
@@ -303,11 +343,11 @@ object FileUtils {
         val ext = extensionFilter?.lowercase()?.removePrefix(".")
 
         root.walkTopDown().onEnter { dir ->
-            if (!showHidden && (dir.isHidden || dir.name.startsWith("."))) false
+            if (!showHidden && isHiddenOrInHiddenFolder(dir)) false
             else true
         }.forEach { file ->
             if (results.size >= maxResults) return@forEach
-            if (!showHidden && (file.isHidden || file.name.startsWith("."))) return@forEach
+            if (!showHidden && isHiddenOrInHiddenFolder(file)) return@forEach
 
             val nameMatch = q.isEmpty() || file.name.lowercase().contains(q)
             val extMatch = ext == null || ext.isEmpty() || file.extension.equals(ext, ignoreCase = true)

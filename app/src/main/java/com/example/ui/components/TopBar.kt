@@ -176,7 +176,8 @@ fun LishFileTopBar(
                     IconButton(onClick = onToggleHiddenFiles, modifier = Modifier.testTag("toggle_hidden_button")) {
                         Icon(
                             imageVector = if (showHiddenFiles) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                            contentDescription = "File Tersembunyi"
+                            contentDescription = if (showHiddenFiles) "Sembunyikan Berkas Tersembunyi" else "Tampilkan Berkas Tersembunyi",
+                            tint = if (showHiddenFiles) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     IconButton(onClick = { showSortMenu = true }, modifier = Modifier.testTag("sort_menu_button")) {

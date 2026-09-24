@@ -153,7 +153,7 @@ object MediaScannerHelper {
                         lastModified = lastMod,
                         extension = file.extension.lowercase(),
                         fileType = fileType,
-                        isHidden = file.isHidden || file.name.startsWith(".")
+                        isHidden = FileUtils.isHiddenOrInHiddenFolder(file)
                     )
 
                     categoryMap[targetCategory]?.add(item)
@@ -231,7 +231,7 @@ object MediaScannerHelper {
                             lastModified = lastMod,
                             extension = ext,
                             fileType = fileType,
-                            isHidden = file.isHidden || file.name.startsWith(".")
+                            isHidden = FileUtils.isHiddenOrInHiddenFolder(file)
                         )
 
                         if (targetCategory != null) {
@@ -303,7 +303,7 @@ object MediaScannerHelper {
                                     ViewCategory.AUDIO -> FileType.AUDIO
                                     else -> FileUtils.getFileType(file)
                                 },
-                                isHidden = file.isHidden || file.name.startsWith(".")
+                                isHidden = FileUtils.isHiddenOrInHiddenFolder(file)
                             )
 
                             if (category != null) {

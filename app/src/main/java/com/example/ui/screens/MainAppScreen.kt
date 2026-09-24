@@ -113,8 +113,11 @@ fun MainAppScreen(
                     onToggleGridView = { viewModel.preferences.setGridView(!isGridView) },
                     showHiddenFiles = showHiddenFiles,
                     onToggleHiddenFiles = {
-                        viewModel.preferences.setShowHiddenFiles(!showHiddenFiles)
-                        viewModel.refreshCurrentDir()
+                        val next = !showHiddenFiles
+                        viewModel.preferences.setShowHiddenFiles(next)
+                        viewModel.notifySnackbar(
+                            if (next) "Berkas tersembunyi ditampilkan" else "Berkas tersembunyi disembunyikan"
+                        )
                     },
                     onSortChange = { by, order -> viewModel.setSorting(by, order) },
                     isMultiSelect = isMultiSelectMode,

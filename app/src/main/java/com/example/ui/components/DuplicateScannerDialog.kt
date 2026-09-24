@@ -41,7 +41,7 @@ fun DuplicateScannerDialog(
     // List of common top folders in storage for multi-selection
     val commonFolders = remember(storageRoot) {
         val candidates = storageRoot.listFiles()?.filter {
-            it.isDirectory && !it.isHidden && !it.name.startsWith(".")
+            it.isDirectory && !com.example.util.FileUtils.isHiddenOrInHiddenFolder(it)
         }?.sortedBy { it.name.lowercase() } ?: emptyList()
         candidates
     }

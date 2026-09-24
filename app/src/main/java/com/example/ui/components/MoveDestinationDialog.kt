@@ -36,7 +36,7 @@ fun MoveDestinationDialog(
     var showCreateFolderDialog by remember { mutableStateOf(false) }
 
     fun refreshFolders(folder: File) {
-        val dirs = folder.listFiles()?.filter { it.isDirectory && !it.isHidden && !it.name.startsWith(".") }?.sortedBy { it.name.lowercase() } ?: emptyList()
+        val dirs = folder.listFiles()?.filter { it.isDirectory && !com.example.util.FileUtils.isHiddenOrInHiddenFolder(it) }?.sortedBy { it.name.lowercase() } ?: emptyList()
         subFolders = dirs
     }
 
