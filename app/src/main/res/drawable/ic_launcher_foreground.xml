@@ -1,8 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item
-        android:width="66dp"
-        android:height="66dp"
-        android:drawable="@drawable/lishfile_icon"
-        android:gravity="center" />
-</layer-list>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Folder Body -->
+    <path
+        android:fillColor="#60A5FA"
+        android:pathData="M30,36h16l4,5h28c2.2,0 4,1.8 4,4v28c0,2.2 -1.8,4 -4,4H30c-2.2,0 -4,-1.8 -4,-4V40c0,-2.2 1.8,-4 4,-4z" />
+    <!-- Front Folder Flap -->
+    <path
+        android:fillColor="#3B82F6"
+        android:pathData="M26,48h56v25c0,2.2 -1.8,4 -4,4H30c-2.2,0 -4,-1.8 -4,-4V48z" />
+    <!-- Vault / Security Shield Symbol -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,52l10,4.5v6.5c0,6.5 -4.3,12.5 -10,14c-5.7,-1.5 -10,-7.5 -10,-14v-6.5L54,52z" />
+    <path
+        android:fillColor="#1D4ED8"
+        android:pathData="M54,56.5l6,2.7v3.8c0,4 -2.6,7.7 -6,8.8c-3.4,-1.1 -6,-4.8 -6,-8.8v-3.8L54,56.5z" />
+</vector>

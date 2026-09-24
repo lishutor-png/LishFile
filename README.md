@@ -1,38 +1,37 @@
-# File Manager + (Android)
+# LishFile 📁
 
-A modern, secure Android File Manager built with Kotlin and Jetpack Compose.
+Aplikasi Manajer Berkas Modern, Cepat, Offline & Aman untuk Android.
 
-## 🚀 Build APK di GitHub (GitHub Actions)
-
-Repositori ini sudah dilengkapi dengan **GitHub Actions Workflow** otomatis (`.github/workflows/build-apk.yml`) untuk membangun file APK secara otomatis di GitHub.
-
-### Cara Mendapatkan APK dari GitHub:
-
-1. **Otomatis saat Push:**
-   - Setiap kali Anda melakukan `git push` ke repositori GitHub, GitHub Actions akan langsung memulai proses build APK.
-
-2. **Manual (Workflow Dispatch):**
-   - Masuk ke tab **Actions** di repositori GitHub Anda.
-   - Pilih alur kerja **Build Android APK** di panel sebelah kiri.
-   - Klik tombol **Run workflow** -> **Run workflow**.
-
-3. **Cara Mengunduh File APK:**
-   - Buka tab **Actions** di repositori GitHub.
-   - Klik proses build terbaru yang selesai (bertanda centang hijau).
-   - Scroll ke bagian bawah ke bagian **Artifacts**.
-   - Klik **File-Manager-Plus-Debug-APK** untuk mengunduh file `.zip` yang berisi `app-debug.apk`.
-   - Ekstrak dan pasang (`install`) APK tersebut ke perangkat Android Anda.
+## ✨ Fitur Utama
+- **Browser Direktori Lengkap**: Navigasi penyimpanan internal, SD Card, dan subdirektori dengan breadcrumbs.
+- **Operasi File Lengkap**: Salin, Pindahkan, Hapus, Ubah Nama, Buat Folder, Buat File Teks, Kompres/Ekstrak ZIP.
+- **Brankas Aman (Safe Vault)**: Lindungi file sensitif dengan enkripsi AES-256 tingkat militer serta otentikasi PIN dan Biometrik/Sidik Jari.
+- **Transfer P2P Lokal**: Kirim dan terima file antar perangkat dalam satu jaringan Wi-Fi lokal langsung tanpa server pihak ketiga.
+- **Kategori & Scanner Duplikat**: Ringkasan penyimpanan visual (Gambar, Audio, Video, Dokumen, APK, Arsip) dan pemindai file duplikat.
+- **Editor Gambar Terintegrasi**: Crop, filter warna, rotasi, dan penyesuaian gambar langsung di dalam aplikasi.
+- **Mode Tema**: Dukungan Tema Terang, Gelap, dan Sistem (Material 3).
 
 ---
 
-## 🛠️ Build APK Secara Lokal (Local Build)
+## 🚀 Cara Build APK di GitHub (GitHub Actions)
 
-Jika ingin build langsung di komputer:
+Repository ini telah dilengkapi dengan workflow GitHub Actions otomatis di `.github/workflows/build-apk.yml`.
 
-```bash
-# Pastikan menggunakan JDK 21
-./gradlew assembleDebug
-```
-
-File APK akan tersedia di:
-`app/build/outputs/apk/debug/app-debug.apk`
+### Langkah-langkah:
+1. **Push kode ke GitHub**:
+   ```bash
+   git add .
+   git commit -m "Initial commit of LishFile"
+   git branch -M main
+   git remote add origin https://github.com/USERNAME/REPO_NAME.git
+   git push -u origin main
+   ```
+2. **Build Otomatis Berjalan**:
+   - Buka tab **Actions** di repositori GitHub Anda.
+   - Pilih workflow **Build LishFile APK**.
+   - GitHub Actions akan otomatis mengompilasi APK debug.
+3. **Download APK**:
+   - Setelah workflow selesai (tanda centang hijau ✅), klik run tersebut.
+   - Scroll ke bagian paling bawah ke bagian **Artifacts**.
+   - Klik **LishFile-Debug-APK** untuk mengunduh berkas ZIP yang berisi file `app-debug.apk`.
+   - Install APK pada perangkat Android Anda.

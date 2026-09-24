@@ -470,7 +470,7 @@ fun PremiumVipDialog(
         },
         title = {
             Text(
-                text = "File Manager + Premium",
+                text = "LishFile Premium",
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -560,7 +560,7 @@ fun FileManagerDrawerSheet(
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
-                    Text("File Manager +", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text("LishFile", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     Text("Versi 3.4.1 (Build Pro)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -573,19 +573,18 @@ fun FileManagerDrawerSheet(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Ringkasan Memori Utama", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Ringkasan Media & Dokumen", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(overviewStats.primaryStorage.subtitle, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Foto: ${overviewStats.imagesCount} • Video: ${overviewStats.videosCount} • Dok: ${overviewStats.docsCount}",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
-
-                DrawerActionRow(
-                    title = "Brankas Pribadi (AES-256)",
-                    subtitle = "Amankan foto, video & dokumen pribadi",
-                    onClick = onOpenVault
-                )
 
                 DrawerActionRow(
                     title = "Pindai File Duplikat",

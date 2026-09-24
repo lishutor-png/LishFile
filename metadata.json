@@ -1,7 +1,8 @@
 {
-  "name": "File Manager +",
-  "description": "Secure offline file manager with categorized visual dashboard, AES-256 encryption, password and biometric lock, local P2P transfer, and storage tools.",
+  "name": "LishFile",
+  "description": "Manajer file offline dan aman dengan browser direktori lengkap, enkripsi AES-256, brankas terkunci PIN dan biometrik, transfer P2P lokal, dan editor gambar.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
-

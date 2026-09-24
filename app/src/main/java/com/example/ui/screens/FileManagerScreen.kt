@@ -1,12 +1,13 @@
 package com.example.ui.screens
 
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Context
+import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,846 +25,1015 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.NoteAdd
-import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.fragment.app.FragmentActivity
+import androidx.core.content.FileProvider
 import com.example.model.FileItem
 import com.example.model.FileType
+import com.example.model.SizeFilter
+import com.example.model.SortBy
+import com.example.model.SortOrder
+import com.example.model.ViewCategory
+import com.example.ui.components.AudioPlayerDialog
 import com.example.ui.components.CategoryDashboard
-import com.example.ui.components.ChecksumDialog
-import com.example.ui.components.CloudServicesDialog
-import com.example.ui.components.ConfirmDeleteDialog
-import com.example.ui.components.CreateZipDialog
-import com.example.ui.components.DashboardCategoryType
-import com.example.ui.components.DecryptDialog
-import com.example.ui.components.DestinationPickerDialog
+import com.example.ui.components.CompressZipDialog
+import com.example.ui.components.ConciseCategoryHomeView
+import com.example.ui.components.CreateFolderDialog
 import com.example.ui.components.DuplicateScannerDialog
-import com.example.ui.components.EncryptDialog
-import com.example.ui.components.FileActionBottomSheet
+import com.example.ui.components.FileDetailsDialog
 import com.example.ui.components.FileGridItem
 import com.example.ui.components.FileListItem
-import com.example.ui.components.FileManagerDrawerSheet
-import com.example.ui.components.FilePreviewDialog
 import com.example.ui.components.ImageEditorDialog
-import com.example.ui.components.LishFileTopBar
-import com.example.ui.components.LockFolderDialog
-import com.example.ui.components.NetworkAccessDialog
-import com.example.ui.components.NewItemDialog
-import com.example.ui.components.PinAuthDialog
-import com.example.ui.components.PremiumVipDialog
-import com.example.ui.components.RemoteConnectionsDialog
-import com.example.ui.components.RenameDialog
+import com.example.ui.components.ImageViewerDialog
+import com.example.ui.components.MoveDestinationDialog
+import com.example.ui.components.PdfReaderDialog
+import com.example.ui.components.PinInputDialog
+import com.example.ui.components.RecentFoldersDialog
+import com.example.ui.components.RenameFileDialog
 import com.example.ui.components.StorageHeader
-import com.example.ui.theme.AppThemeMode
+import com.example.ui.components.TextEditorDialog
+import com.example.ui.components.VideoPlayerDialog
+import com.example.ui.components.ZipPreviewDialog
 import com.example.util.FileUtils
+import com.example.util.StoragePermissionHelper
 import com.example.viewmodel.FileManagerViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable
 fun FileManagerScreen(
     viewModel: FileManagerViewModel,
-    themeMode: AppThemeMode,
-    onThemeToggle: () -> Unit,
-    onOpenVault: () -> Unit = {}
+    onOpenVault: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val activity = context as? FragmentActivity
-
     val currentDir by viewModel.currentDir.collectAsState()
-    val displayedFiles by viewModel.displayedFiles.collectAsState()
-    val storageStats by viewModel.storageStats.collectAsState()
-    val searchQuery by viewModel.searchQuery.collectAsState()
-    val selectedCategory by viewModel.selectedCategory.collectAsState()
-    val showHiddenFiles by viewModel.preferences.showHiddenFiles.collectAsState()
-    val isGridView by viewModel.preferences.isGridView.collectAsState()
-    val sortBy by viewModel.preferences.sortBy.collectAsState()
-    val sortOrder by viewModel.preferences.sortOrder.collectAsState()
-    val operationProgress by viewModel.operationProgress.collectAsState()
-
-    // Advanced Navigation & Storage State
+    val availableStorages by viewModel.availableStorages.collectAsState()
+    val selectedStorageIndex by viewModel.selectedStorageIndex.collectAsState()
     val canNavigateBack by viewModel.canNavigateBack.collectAsState()
     val canNavigateForward by viewModel.canNavigateForward.collectAsState()
-    val recentFolders by viewModel.recentFolders.collectAsState()
-    val availableStorages by viewModel.availableStorages.collectAsState()
-    val activeStorageRoot = viewModel.activeStorageRoot
-    val isLargestFilesActive by viewModel.isLargestFilesActive.collectAsState()
-
-    // Multi-select & Clipboard State
+    val storageStats by viewModel.storageStats.collectAsState()
+    val categoryStats by viewModel.categoryOverviewStats.collectAsState()
+    val isGridView by viewModel.preferences.isGridView.collectAsState()
     val isMultiSelectMode by viewModel.isMultiSelectMode.collectAsState()
     val selectedPaths by viewModel.selectedPaths.collectAsState()
     val clipboard by viewModel.clipboard.collectAsState()
-
-    // Advanced Search Filters
-    val searchExtension by viewModel.searchExtension.collectAsState()
-    val searchSizeFilter by viewModel.searchSizeFilter.collectAsState()
-    val searchEntireStorage by viewModel.searchEntireStorage.collectAsState()
-
-    // Duplicate Scanner State
+    val selectedCategory by viewModel.selectedCategory.collectAsState()
+    val sizeFilter by viewModel.sizeFilter.collectAsState()
     val duplicateResult by viewModel.duplicateResult.collectAsState()
-    var showDuplicateScanner by remember { mutableStateOf(false) }
+    val recentFolders by viewModel.recentFolders.collectAsState()
+    val isDeepSearching by viewModel.isDeepSearching.collectAsState()
+    val searchEntireStorage by viewModel.searchEntireStorage.collectAsState()
+    val extensionFilter by viewModel.extensionFilter.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
 
-    // Dialog & Sheet States
-    var selectedFileForAction by remember { mutableStateOf<FileItem?>(null) }
-    var fileToEncrypt by remember { mutableStateOf<File?>(null) }
-    var fileToDecrypt by remember { mutableStateOf<File?>(null) }
-    var folderToLock by remember { mutableStateOf<File?>(null) }
-    var folderToUnlock by remember { mutableStateOf<File?>(null) }
-    var fileToPreview by remember { mutableStateOf<File?>(null) }
-    var fileToEditImage by remember { mutableStateOf<File?>(null) }
-    var fileForChecksum by remember { mutableStateOf<File?>(null) }
-    var fileToCopyOrMove by remember { mutableStateOf<Pair<File, Boolean>?>(null) } // (file, isCopy)
-    var showNewItemDialog by remember { mutableStateOf(false) }
+    val files = viewModel.getFilteredAndSortedFiles()
+
+    // Dialogs state
+    var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var showCreateTextFileDialog by remember { mutableStateOf(false) }
+    var editingTextFile by remember { mutableStateOf<File?>(null) }
+    var editingTextContent by remember { mutableStateOf("") }
+    var renameTargetFile by remember { mutableStateOf<File?>(null) }
+    var detailsTargetItem by remember { mutableStateOf<FileItem?>(null) }
+    var zipTargetFiles by remember { mutableStateOf<List<File>?>(null) }
+    var showDuplicateScanner by remember { mutableStateOf(false) }
+    var editingImageFile by remember { mutableStateOf<File?>(null) }
+    var viewingImageFile by remember { mutableStateOf<File?>(null) }
+    var playingAudioFile by remember { mutableStateOf<File?>(null) }
+    var playingVideoFile by remember { mutableStateOf<File?>(null) }
+    var viewingPdfFile by remember { mutableStateOf<File?>(null) }
+    var previewingZipFile by remember { mutableStateOf<File?>(null) }
+    var movingTargetFile by remember { mutableStateOf<File?>(null) }
+    var showRecentFoldersDialog by remember { mutableStateOf(false) }
+    var vaultLockTargetFile by remember { mutableStateOf<File?>(null) }
     var showFabMenu by remember { mutableStateOf(false) }
 
-    // Dashboard State & Dialogs
-    val isHomeDashboard by viewModel.isHomeDashboard.collectAsState()
-    val categoryOverviewStats by viewModel.categoryOverviewStats.collectAsState()
+    var isBrowsingFolder by rememberSaveable { mutableStateOf(false) }
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val isSearching = searchQuery.isNotEmpty() || extensionFilter != null || searchEntireStorage
+    val shouldShowExplorer = isBrowsingFolder || isSearching
+    val hasStoragePermission = StoragePermissionHelper.hasStoragePermission(context)
 
-    var showCloudDialog by remember { mutableStateOf(false) }
-    var showRemoteDialog by remember { mutableStateOf(false) }
-    var showNetworkAccessDialog by remember { mutableStateOf(false) }
-    var showVipDialog by remember { mutableStateOf(false) }
-    var showDrawerSheet by remember { mutableStateOf(false) }
-
-    // Zip, Rename, Delete Dialog States
-    var fileToZip by remember { mutableStateOf<File?>(null) }
-    var fileToRename by remember { mutableStateOf<File?>(null) }
-    var fileToDeletePermanent by remember { mutableStateOf<File?>(null) }
-    var showBulkDeleteConfirm by remember { mutableStateOf(false) }
-
-    // File Picker for importing documents
-    val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.importFileFromUri(it) }
+    BackHandler(enabled = isBrowsingFolder && !isSearching) {
+        if (canNavigateBack) {
+            viewModel.navigateBack()
+        } else {
+            isBrowsingFolder = false
+            viewModel.setCategory(ViewCategory.ALL)
+        }
     }
 
-    val isRoot = currentDir.absolutePath == activeStorageRoot.absolutePath
+    val activeStorageRoot = availableStorages.getOrNull(selectedStorageIndex)?.rootDir
+    val isAtRoot = activeStorageRoot != null && currentDir.absolutePath == activeStorageRoot.absolutePath
 
-    Scaffold(
-        topBar = {
-            LishFileTopBar(
-                currentDir = currentDir,
-                isRoot = isRoot,
-                onNavigateUp = { viewModel.navigateUp() },
-                searchQuery = searchQuery,
-                onSearchQueryChange = { viewModel.setSearchQuery(it) },
-                showHiddenFiles = showHiddenFiles,
-                onToggleHiddenFiles = { viewModel.toggleHiddenFiles() },
-                isGridView = isGridView,
-                onToggleGridView = { viewModel.toggleGridView() },
-                currentSortBy = sortBy,
-                currentSortOrder = sortOrder,
-                onSortChange = { sb, so -> viewModel.setSorting(sb, so) },
-                themeMode = themeMode,
-                onThemeToggle = onThemeToggle,
-                onLogoClick = onOpenVault,
-                // Multi-select
-                isMultiSelectMode = isMultiSelectMode,
-                selectedCount = selectedPaths.size,
-                onCloseMultiSelect = { viewModel.exitMultiSelectMode() },
-                onSelectAll = { viewModel.selectAll() },
-                onDeleteSelected = { showBulkDeleteConfirm = true },
-                onCopySelected = { viewModel.copySelectedToClipboard() },
-                onCutSelected = { viewModel.cutSelectedToClipboard() },
-                onShareSelected = { viewModel.shareSelectedFiles(context) },
-                onZipSelected = { viewModel.compressSelectedToZip("Arsip_Terpilih_${System.currentTimeMillis() % 1000}.zip") },
-                onStartMultiSelect = { viewModel.enterMultiSelectMode() },
-                // Search Filters
-                searchExtension = searchExtension,
-                onExtensionFilterChange = { viewModel.setSearchExtension(it) },
-                searchSizeFilter = searchSizeFilter,
-                onSizeFilterChange = { viewModel.setSearchSizeFilter(it) },
-                searchEntireStorage = searchEntireStorage,
-                onToggleSearchEntireStorage = { viewModel.toggleSearchEntireStorage() },
-                // Duplicate Scanner
-                onOpenDuplicateScanner = { showDuplicateScanner = true },
-                // Dashboard & Home
-                isHomeDashboard = isHomeDashboard,
-                onNavigateToDashboard = { viewModel.navigateToHomeDashboard() },
-                onOpenDrawer = { showDrawerSheet = true },
-                onOpenVip = { showVipDialog = true },
-                onRefresh = { viewModel.refreshCategoryStats() }
-            )
-        },
-        floatingActionButton = {
-            if (!isMultiSelectMode && !isHomeDashboard) {
-                Box {
-                    FloatingActionButton(
-                        onClick = { showFabMenu = true },
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.testTag("main_add_fab")
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = "Tambah dokumen / folder")
-                    }
-
-                    DropdownMenu(
-                        expanded = showFabMenu,
-                        onDismissRequest = { showFabMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Buat Folder Baru") },
-                            leadingIcon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) },
-                            onClick = {
-                                showFabMenu = false
-                                showNewItemDialog = true
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Buat Catatan Teks (.txt)") },
-                            leadingIcon = { Icon(Icons.Default.NoteAdd, contentDescription = null) },
-                            onClick = {
-                                showFabMenu = false
-                                showNewItemDialog = true
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Impor Dokumen dari Penyimpanan") },
-                            leadingIcon = { Icon(Icons.Default.UploadFile, contentDescription = null) },
-                            onClick = {
-                                showFabMenu = false
-                                filePickerLauncher.launch("*/*")
-                            }
-                        )
-                    }
+    Box(modifier = modifier.fillMaxSize()) {
+        if (!shouldShowExplorer) {
+            ConciseCategoryHomeView(
+                hasStoragePermission = hasStoragePermission,
+                onRequestPermission = { StoragePermissionHelper.requestStoragePermission(context) },
+                storages = availableStorages,
+                categoryStats = categoryStats,
+                recentFolders = recentFolders,
+                onOpenStorage = { storage ->
+                    viewModel.openStorageVolume(storage)
+                    isBrowsingFolder = true
+                },
+                onOpenCategory = { cat ->
+                    viewModel.openCategoryDirectory(cat)
+                    isBrowsingFolder = true
+                },
+                onOpenDuplicates = {
+                    showDuplicateScanner = true
+                    viewModel.scanDuplicates()
+                },
+                onOpenRecentFolder = { folder ->
+                    viewModel.navigateTo(folder)
+                    isBrowsingFolder = true
+                },
+                onShowAllRecentFolders = { showRecentFoldersDialog = true },
+                onSdCardNotAvailable = {
+                    viewModel.notifySnackbar("Kartu SD atau USB OTG tidak terpasang di perangkat")
                 }
-            }
-        }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            if (isHomeDashboard) {
-                CategoryDashboard(
-                    overviewStats = categoryOverviewStats,
-                    onCategoryClick = { catType ->
-                        when (catType) {
-                            DashboardCategoryType.CLOUD -> showCloudDialog = true
-                            DashboardCategoryType.REMOTE -> showRemoteDialog = true
-                            DashboardCategoryType.NETWORK_ACCESS -> showNetworkAccessDialog = true
-                            else -> viewModel.openFromDashboard(catType)
+            )
+        } else {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // 1. Unified Breadcrumb & Navigation Header
+                BreadcrumbHeader(
+                    currentDir = currentDir,
+                    isAtRoot = isAtRoot,
+                    canNavigateBack = canNavigateBack,
+                    canNavigateForward = canNavigateForward,
+                    onNavigateBack = { viewModel.navigateBack() },
+                    onNavigateForward = { viewModel.navigateForward() },
+                    onNavigateUp = {
+                        if (isAtRoot) {
+                            isBrowsingFolder = false
+                            viewModel.setCategory(ViewCategory.ALL)
+                        } else {
+                            viewModel.navigateUp()
                         }
                     },
-                    modifier = Modifier.fillMaxSize()
+                    onBackToCategories = {
+                        isBrowsingFolder = false
+                        viewModel.setCategory(ViewCategory.ALL)
+                        viewModel.setSearchQuery("")
+                        viewModel.setExtensionFilter(null)
+                    },
+                    onNavigateToPath = { viewModel.navigateTo(it) },
+                    onShowRecentFolders = { showRecentFoldersDialog = true }
                 )
-            } else {
-                // Header with Storage info & Category Chips & Breadcrumbs & History navigation
-                StorageHeader(
-                storageStats = storageStats,
-                selectedCategory = selectedCategory,
-                onSelectCategory = { viewModel.setCategory(it) },
-                currentDir = currentDir,
-                rootDir = viewModel.primaryRootDir,
-                onNavigateToDir = { viewModel.navigateToPath(it) },
-                onLogoClick = onOpenVault,
-                canNavigateBack = canNavigateBack,
-                canNavigateForward = canNavigateForward,
-                onNavigateBack = { viewModel.navigateHistoryBack() },
-                onNavigateForward = { viewModel.navigateHistoryForward() },
-                recentFolders = recentFolders,
-                availableStorages = availableStorages,
-                activeStorageRoot = activeStorageRoot,
-                onSwitchStorage = { viewModel.switchStorageRoot(it) },
-                isLargestFilesActive = isLargestFilesActive,
-                onToggleLargestFiles = { viewModel.toggleLargestFiles() }
-            )
 
-            // Large file operation progress indicator banner
-            AnimatedVisibility(visible = operationProgress.isVisible) {
-                Card(
+                // 2. Storage Overview bar (only if multi-storage available)
+                if (availableStorages.size > 1) {
+                    StorageHeader(
+                        storages = availableStorages,
+                        selectedStorageIndex = selectedStorageIndex,
+                        onSelectStorage = { viewModel.switchStorage(it) },
+                        storageStats = storageStats
+                    )
+                }
+
+                // 3. Quick filter chips row (if category active or size filter active)
+                if (selectedCategory != ViewCategory.ALL || sizeFilter != SizeFilter.ANY) {
+                    FilterChipsRow(
+                        selectedCategory = selectedCategory,
+                        onSelectCategory = { viewModel.setCategory(it) },
+                        sizeFilter = sizeFilter,
+                        onSelectSizeFilter = { viewModel.setSizeFilter(it) }
+                    )
+                }
+
+            // Deep Search Status Banner
+            if (isDeepSearching) {
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Mencari di seluruh penyimpanan...",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            } else if (searchEntireStorage && files.isNotEmpty()) {
+                Text(
+                    text = "Ditemukan ${files.size} file di seluruh penyimpanan",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                )
+            }
+
+            // 5. Clipboard Banner (if files copied/cut)
+            clipboard?.let { clip ->
+                ClipboardBanner(
+                    itemCount = clip.files.size,
+                    isCut = clip.isCut,
+                    onPaste = { viewModel.pasteClipboard() },
+                    onCancel = { viewModel.clearClipboard() }
+                )
+            }
+
+            // 6. Files List / Grid View
+            if (files.isEmpty() && !isDeepSearching) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = operationProgress.title,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            Text(
-                                text = "${operationProgress.percent}%",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            Icon(
+                                imageVector = if (isSearching) Icons.Default.Search else Icons.Default.FolderOpen,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(32.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        LinearProgressIndicator(
-                            progress = { operationProgress.percent / 100f },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(3.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = if (isSearching) "Tidak Ada Hasil Pencarian" else "Folder Ini Kosong",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = operationProgress.detail,
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                        )
-                    }
-                }
-            }
-
-            // Floating Clipboard Bar (shows when user copied/cut files and can paste in current directory)
-            clipboard?.let { clip ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = if (clip.isCut) Icons.Default.ContentCut else Icons.Default.ContentCopy,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "${clip.files.size} berkas (${if (clip.isCut) "Dipindahkan" else "Disalin"})",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Button(
-                                onClick = { viewModel.pasteClipboard() },
-                                modifier = Modifier.testTag("paste_clipboard_button")
-                            ) {
-                                Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Tempel di Sini", fontSize = 12.sp)
-                            }
-                            IconButton(
-                                onClick = { viewModel.clearClipboard() },
-                                modifier = Modifier.size(32.dp).testTag("cancel_clipboard_button")
-                            ) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "Batal",
-                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // File Listing Area
-            if (displayedFiles.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.FolderOpen,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                            modifier = Modifier.size(64.dp)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = if (searchQuery.isNotEmpty()) "Tidak ada file yang cocok dengan '$searchQuery'" else "Folder ini kosong",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
+                            text = if (isSearching) "Coba kata kunci lain atau periksa filter ekstensi"
+                            else "Belum ada berkas atau sub-folder di direktori ini",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Gunakan tombol '+' di bawah untuk membuat atau mengimpor file",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
-                    }
-                }
-            } else if (isGridView) {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 130.dp),
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(displayedFiles, key = { it.path }) { item ->
-                        val isSelected = selectedPaths.contains(item.path)
-                        FileGridItem(
-                            fileItem = item,
-                            isMultiSelectMode = isMultiSelectMode,
-                            isSelected = isSelected,
-                            onToggleSelect = { viewModel.toggleSelectPath(item.path) },
-                            onLongClick = {
-                                viewModel.enterMultiSelectMode()
-                                viewModel.toggleSelectPath(item.path)
-                            },
-                            onClick = {
-                                if (isMultiSelectMode) {
-                                    viewModel.toggleSelectPath(item.path)
-                                } else {
-                                    handleItemClick(
-                                        item = item,
-                                        viewModel = viewModel,
-                                        activity = activity,
-                                        onFolderLocked = { folderToUnlock = it },
-                                        onDecrypt = { fileToDecrypt = it },
-                                        onPreview = { fileToPreview = it },
-                                        onOpen = { FileUtils.openFileWithExternalApp(context, it) }
-                                    )
-                                }
-                            },
-                            onMoreClick = { selectedFileForAction = item }
-                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        if (isSearching) {
+                            Button(
+                                onClick = {
+                                    viewModel.setSearchQuery("")
+                                    viewModel.setExtensionFilter(null)
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            ) {
+                                Text("Bersihkan Pencarian", fontWeight = FontWeight.SemiBold)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = { showCreateFolderDialog = true },
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.CreateNewFolder, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Buat Folder Baru", fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                     }
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 80.dp)
-                ) {
-                    items(displayedFiles, key = { it.path }) { item ->
-                        val isSelected = selectedPaths.contains(item.path)
-                        FileListItem(
-                            fileItem = item,
-                            isMultiSelectMode = isMultiSelectMode,
-                            isSelected = isSelected,
-                            onToggleSelect = { viewModel.toggleSelectPath(item.path) },
-                            onLongClick = {
-                                viewModel.enterMultiSelectMode()
-                                viewModel.toggleSelectPath(item.path)
-                            },
-                            onClick = {
-                                if (isMultiSelectMode) {
-                                    viewModel.toggleSelectPath(item.path)
-                                } else {
-                                    handleItemClick(
+                if (isGridView) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 105.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(horizontal = 12.dp),
+                        contentPadding = PaddingValues(bottom = 80.dp)
+                    ) {
+                        items(files, key = { it.path }) { item ->
+                            FileGridItem(
+                                item = item,
+                                isSelected = selectedPaths.contains(item.path),
+                                isMultiSelectMode = isMultiSelectMode,
+                                onClick = {
+                                    handleFileClick(
+                                        context = context,
                                         item = item,
+                                        coroutineScope = coroutineScope,
                                         viewModel = viewModel,
-                                        activity = activity,
-                                        onFolderLocked = { folderToUnlock = it },
-                                        onDecrypt = { fileToDecrypt = it },
-                                        onPreview = { fileToPreview = it },
-                                        onOpen = { FileUtils.openFileWithExternalApp(context, it) }
+                                        onViewImage = { viewingImageFile = it },
+                                        onPlayAudio = { playingAudioFile = it },
+                                        onPlayVideo = { playingVideoFile = it },
+                                        onViewPdf = { viewingPdfFile = it },
+                                        onPreviewZip = { previewingZipFile = it },
+                                        onEditText = { f, content ->
+                                            editingTextFile = f
+                                            editingTextContent = content
+                                        },
+                                        onEditImage = { f -> editingImageFile = f }
                                     )
-                                }
-                            },
-                            onMoreClick = { selectedFileForAction = item }
-                        )
-                        HorizontalDivider(
-                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        )
+                                },
+                                onLongClick = { viewModel.togglePathSelection(item.path) },
+                                onToggleSelect = { viewModel.togglePathSelection(item.path) },
+                                onRename = { renameTargetFile = item.file },
+                                onDelete = { viewModel.deleteFile(item.file) },
+                                onCopy = {
+                                    viewModel.togglePathSelection(item.path)
+                                    viewModel.copySelected()
+                                },
+                                onCut = {
+                                    viewModel.togglePathSelection(item.path)
+                                    viewModel.cutSelected()
+                                },
+                                onDetails = { detailsTargetItem = item },
+                                onZip = { zipTargetFiles = listOf(item.file) },
+                                onExtractZip = { viewModel.extractZip(item.file) },
+                                onMoveToVault = { vaultLockTargetFile = item.file },
+                                onEditImage = { editingImageFile = item.file },
+                                onShare = { FileUtils.shareFile(context, item.file) },
+                                onMove = { movingTargetFile = item.file },
+                                onPreviewZip = { previewingZipFile = item.file }
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentPadding = PaddingValues(bottom = 80.dp)
+                    ) {
+                        items(files, key = { it.path }) { item ->
+                            FileListItem(
+                                item = item,
+                                isSelected = selectedPaths.contains(item.path),
+                                isMultiSelectMode = isMultiSelectMode,
+                                onClick = {
+                                    handleFileClick(
+                                        context = context,
+                                        item = item,
+                                        coroutineScope = coroutineScope,
+                                        viewModel = viewModel,
+                                        onViewImage = { viewingImageFile = it },
+                                        onPlayAudio = { playingAudioFile = it },
+                                        onPlayVideo = { playingVideoFile = it },
+                                        onViewPdf = { viewingPdfFile = it },
+                                        onPreviewZip = { previewingZipFile = it },
+                                        onEditText = { f, content ->
+                                            editingTextFile = f
+                                            editingTextContent = content
+                                        },
+                                        onEditImage = { f -> editingImageFile = f }
+                                    )
+                                },
+                                onLongClick = { viewModel.togglePathSelection(item.path) },
+                                onToggleSelect = { viewModel.togglePathSelection(item.path) },
+                                onRename = { renameTargetFile = item.file },
+                                onDelete = { viewModel.deleteFile(item.file) },
+                                onCopy = {
+                                    viewModel.togglePathSelection(item.path)
+                                    viewModel.copySelected()
+                                },
+                                onCut = {
+                                    viewModel.togglePathSelection(item.path)
+                                    viewModel.cutSelected()
+                                },
+                                onDetails = { detailsTargetItem = item },
+                                onZip = { zipTargetFiles = listOf(item.file) },
+                                onExtractZip = { viewModel.extractZip(item.file) },
+                                onMoveToVault = { vaultLockTargetFile = item.file },
+                                onEditImage = { editingImageFile = item.file },
+                                onShare = { FileUtils.shareFile(context, item.file) },
+                                onMove = { movingTargetFile = item.file },
+                                onPreviewZip = { previewingZipFile = item.file }
+                            )
+                        }
                     }
                 }
             }
             }
         }
-    }
 
-    // File Action Bottom Sheet
-    selectedFileForAction?.let { fileItem ->
-        FileActionBottomSheet(
-            fileItem = fileItem,
-            onDismiss = { selectedFileForAction = null },
-            onOpenExternal = {
-                selectedFileForAction = null
-                FileUtils.openFileWithExternalApp(context, fileItem.file)
-            },
-            onPreview = {
-                selectedFileForAction = null
-                fileToPreview = fileItem.file
-            },
-            onEncrypt = {
-                selectedFileForAction = null
-                fileToEncrypt = fileItem.file
-            },
-            onDecrypt = {
-                selectedFileForAction = null
-                fileToDecrypt = fileItem.file
-            },
-            onLockFolder = {
-                selectedFileForAction = null
-                folderToLock = fileItem.file
-            },
-            onMoveToVault = {
-                selectedFileForAction = null
-                viewModel.moveToSafeVault(fileItem.file)
-            },
-            onShare = {
-                selectedFileForAction = null
-                FileUtils.shareFileViaBluetoothOrSystem(context, fileItem.file)
-            },
-            onCopy = {
-                selectedFileForAction = null
-                viewModel.copyToClipboard(listOf(fileItem.file))
-            },
-            onMove = {
-                selectedFileForAction = null
-                viewModel.cutToClipboard(listOf(fileItem.file))
-            },
-            onRename = {
-                selectedFileForAction = null
-                fileToRename = fileItem.file
-            },
-            onDelete = {
-                selectedFileForAction = null
-                fileToDeletePermanent = fileItem.file
-            },
-            onChecksum = {
-                selectedFileForAction = null
-                fileForChecksum = fileItem.file
-            },
-            onCompressZip = {
-                selectedFileForAction = null
-                fileToZip = fileItem.file
-            },
-            onExtractZip = {
-                selectedFileForAction = null
-                viewModel.extractZip(fileItem.file)
-            },
-            onEditImage = {
-                val f = fileItem.file
-                selectedFileForAction = null
-                fileToEditImage = f
-            }
-        )
-    }
-
-    // Encrypt Dialog
-    fileToEncrypt?.let { file ->
-        EncryptDialog(
-            fileName = file.name,
-            onDismiss = { fileToEncrypt = null },
-            onConfirm = { password, deleteOriginal ->
-                fileToEncrypt = null
-                viewModel.encryptFileWithAes(file, password, deleteOriginal)
-            }
-        )
-    }
-
-    // Decrypt Dialog
-    fileToDecrypt?.let { file ->
-        DecryptDialog(
-            fileName = file.name,
-            onDismiss = { fileToDecrypt = null },
-            onConfirm = { password, deleteEncrypted ->
-                fileToDecrypt = null
-                viewModel.decryptFileWithAes(file, password, deleteEncrypted)
-            }
-        )
-    }
-
-    // Lock Folder Dialog
-    folderToLock?.let { folder ->
-        LockFolderDialog(
-            folderName = folder.name,
-            onDismiss = { folderToLock = null },
-            onConfirm = { password, allowBiometric ->
-                folderToLock = null
-                viewModel.lockFolder(folder, password, allowBiometric)
-            }
-        )
-    }
-
-    // Unlock Folder Auth Dialog (Password / PIN / Biometric)
-    folderToUnlock?.let { folder ->
-        PinAuthDialog(
-            title = "Buka Folder Terkunci",
-            subtitle = "Folder '${folder.name}' dilindungi keamanan.",
-            canUseBiometric = viewModel.securityManager.canUseBiometric(),
-            onDismiss = { folderToUnlock = null },
-            onPinSubmit = { pin ->
-                viewModel.unlockFolderWithPassword(folder.absolutePath, pin) {
-                    folderToUnlock = null
-                    viewModel.navigateTo(folder)
-                }
-            },
-            onBiometricClick = {
-                if (activity != null) {
-                    viewModel.unlockWithBiometrics(activity, folder.absolutePath) {
-                        folderToUnlock = null
-                        viewModel.navigateTo(folder)
+        // Floating Action Button with quick actions
+        if (shouldShowExplorer) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                AnimatedVisibility(visible = showFabMenu) {
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    ) {
+                        SmallFloatingActionButton(
+                            onClick = {
+                                showFabMenu = false
+                                showDuplicateScanner = true
+                                viewModel.scanDuplicates()
+                            },
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                        ) {
+                            Icon(Icons.Default.CleaningServices, contentDescription = "Scan Duplikat")
+                        }
+                        SmallFloatingActionButton(
+                            onClick = {
+                                showFabMenu = false
+                                showCreateFolderDialog = true
+                            },
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Icon(Icons.Default.CreateNewFolder, contentDescription = "Folder Baru")
+                        }
+                        SmallFloatingActionButton(
+                            onClick = {
+                                showFabMenu = false
+                                showCreateTextFileDialog = true
+                            },
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Icon(Icons.Default.NoteAdd, contentDescription = "File Teks Baru")
+                        }
                     }
                 }
-            }
-        )
-    }
 
-    // In-App File Preview / Editor Dialog (Images, Text, Audio, Video, PDF)
-    fileToPreview?.let { file ->
-        FilePreviewDialog(
-            file = file,
-            onDismiss = { fileToPreview = null },
-            onSaveContent = { content ->
-                viewModel.saveTextFile(file, content) {
-                    fileToPreview = null
-                }
-            },
-            onFileUpdated = { updatedFile ->
-                viewModel.refreshCurrentDir()
-                viewModel.refreshCategoryStats()
-                fileToPreview = updatedFile
-            }
-        )
-    }
-
-    // Direct Image Editor Dialog
-    fileToEditImage?.let { file ->
-        ImageEditorDialog(
-            file = file,
-            onDismiss = { fileToEditImage = null },
-            onSaveSuccess = { savedFile ->
-                fileToEditImage = null
-                viewModel.refreshCurrentDir()
-                viewModel.refreshCategoryStats()
-            }
-        )
-    }
-
-    // Checksum & Metadata Dialog
-    fileForChecksum?.let { file ->
-        ChecksumDialog(
-            file = file,
-            onDismiss = { fileForChecksum = null }
-        )
-    }
-
-    // Destination Picker (for Copy / Move)
-    fileToCopyOrMove?.let { (file, isCopy) ->
-        DestinationPickerDialog(
-            rootDir = viewModel.primaryRootDir,
-            onDismiss = { fileToCopyOrMove = null },
-            onDestinationSelected = { dest ->
-                fileToCopyOrMove = null
-                if (isCopy) {
-                    viewModel.copyFile(file, dest)
-                } else {
-                    viewModel.moveFile(file, dest)
+                FloatingActionButton(
+                    onClick = { showFabMenu = !showFabMenu },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.testTag("main_fab")
+                ) {
+                    Icon(
+                        imageVector = if (showFabMenu) Icons.Default.Clear else Icons.Default.Add,
+                        contentDescription = "Menu Tambah"
+                    )
                 }
             }
-        )
+        }
     }
 
-    // Create ZIP Dialog
-    fileToZip?.let { file ->
-        CreateZipDialog(
-            defaultZipName = "${file.nameWithoutExtension}.zip",
-            onDismiss = { fileToZip = null },
-            onConfirm = { zipName ->
-                fileToZip = null
-                viewModel.compressToZip(listOf(file), zipName)
-            }
-        )
-    }
-
-    // Rename Dialog
-    fileToRename?.let { file ->
-        RenameDialog(
-            currentName = file.name,
-            onDismiss = { fileToRename = null },
-            onConfirm = { newName ->
-                fileToRename = null
-                viewModel.renameFile(file, newName)
-            }
-        )
-    }
-
-    // Delete Single File Confirm Dialog
-    fileToDeletePermanent?.let { file ->
-        ConfirmDeleteDialog(
-            itemCount = 1,
-            itemName = file.name,
-            onDismiss = { fileToDeletePermanent = null },
+    // Dialogs
+    if (showCreateFolderDialog) {
+        CreateFolderDialog(
+            onDismiss = { showCreateFolderDialog = false },
             onConfirm = {
-                fileToDeletePermanent = null
-                viewModel.deleteFile(file)
+                viewModel.createFolder(it)
+                showCreateFolderDialog = false
             }
         )
     }
 
-    // Bulk Delete Confirm Dialog
-    if (showBulkDeleteConfirm) {
-        ConfirmDeleteDialog(
-            itemCount = selectedPaths.size,
-            onDismiss = { showBulkDeleteConfirm = false },
-            onConfirm = {
-                showBulkDeleteConfirm = false
-                viewModel.deleteSelectedFiles()
-            }
-        )
-    }
-
-    // Duplicate Scanner Dialog
-    if (showDuplicateScanner) {
-        DuplicateScannerDialog(
-            scanResult = duplicateResult,
-            currentDir = currentDir,
-            onDismiss = { showDuplicateScanner = false },
-            onStartScanCurrent = { viewModel.scanDuplicates(listOf(currentDir)) },
-            onStartScanAll = { viewModel.scanDuplicates(listOf(activeStorageRoot), scanAllStorage = true) },
-            onToggleItem = { viewModel.toggleDuplicateSelection(it) },
-            onAutoSelect = { viewModel.autoSelectDuplicates() },
-            onDeleteSelected = { viewModel.deleteSelectedDuplicates() }
-        )
-    }
-
-    // New Item Dialog (Folder or Text Note)
-    if (showNewItemDialog) {
-        NewItemDialog(
-            onDismiss = { showNewItemDialog = false },
-            onCreateFolder = { name ->
-                showNewItemDialog = false
-                viewModel.createFolder(name)
-            },
-            onCreateTextFile = { name, content ->
-                showNewItemDialog = false
+    if (showCreateTextFileDialog) {
+        TextEditorDialog(
+            fileName = "Dokumen Baru.txt",
+            initialContent = "",
+            isNewFile = true,
+            onDismiss = { showCreateTextFileDialog = false },
+            onSave = { name, content ->
                 viewModel.createTextFile(name, content)
+                showCreateTextFileDialog = false
             }
         )
     }
 
-    // Dashboard Feature Dialogs
-    if (showCloudDialog) {
-        CloudServicesDialog(onDismiss = { showCloudDialog = false })
-    }
-
-    if (showRemoteDialog) {
-        RemoteConnectionsDialog(onDismiss = { showRemoteDialog = false })
-    }
-
-    if (showNetworkAccessDialog) {
-        NetworkAccessDialog(
-            onDismiss = { showNetworkAccessDialog = false },
-            onOpenFullTransferScreen = {
-                // Navigate via bottom bar or toast
+    editingTextFile?.let { file ->
+        TextEditorDialog(
+            fileName = file.name,
+            initialContent = editingTextContent,
+            isNewFile = false,
+            onDismiss = { editingTextFile = null },
+            onSave = { _, content ->
+                viewModel.saveTextFile(file, content) {
+                    editingTextFile = null
+                }
             }
         )
     }
 
-    if (showVipDialog) {
-        PremiumVipDialog(onDismiss = { showVipDialog = false })
+    renameTargetFile?.let { file ->
+        RenameFileDialog(
+            currentName = file.name,
+            onDismiss = { renameTargetFile = null },
+            onConfirm = {
+                viewModel.renameFile(file, it)
+                renameTargetFile = null
+            }
+        )
     }
 
-    if (showDrawerSheet) {
-        FileManagerDrawerSheet(
-            onDismiss = { showDrawerSheet = false },
-            onOpenVault = {
-                showDrawerSheet = false
-                onOpenVault()
+    detailsTargetItem?.let { item ->
+        FileDetailsDialog(
+            item = item,
+            onDismiss = { detailsTargetItem = null }
+        )
+    }
+
+    zipTargetFiles?.let { filesList ->
+        val defaultName = if (filesList.size == 1) "${filesList[0].nameWithoutExtension}.zip" else "Arsip.zip"
+        CompressZipDialog(
+            defaultZipName = defaultName,
+            onDismiss = { zipTargetFiles = null },
+            onConfirm = {
+                viewModel.compressToZip(filesList, it)
+                zipTargetFiles = null
+            }
+        )
+    }
+
+    if (showDuplicateScanner) {
+        val rootDir = availableStorages.firstOrNull()?.rootDir ?: currentDir
+        DuplicateScannerDialog(
+            currentDir = currentDir,
+            storageRoot = rootDir,
+            result = duplicateResult,
+            onStartScan = { folders, desc -> viewModel.scanDuplicates(folders, desc) },
+            onToggleSelect = { checksum, path -> viewModel.toggleDuplicateSelection(checksum, path) },
+            onCleanDuplicates = {
+                viewModel.deleteSelectedDuplicates()
+                showDuplicateScanner = false
             },
-            onOpenDuplicates = {
-                showDrawerSheet = false
-                showDuplicateScanner = true
-            },
-            onToggleTheme = {
-                showDrawerSheet = false
-                onThemeToggle()
-            },
-            themeMode = themeMode,
-            overviewStats = categoryOverviewStats
+            onDismiss = { showDuplicateScanner = false }
+        )
+    }
+
+    viewingImageFile?.let { imgFile ->
+        ImageViewerDialog(
+            file = imgFile,
+            onDismiss = { viewingImageFile = null },
+            onEditImage = {
+                viewingImageFile = null
+                editingImageFile = imgFile
+            }
+        )
+    }
+
+    playingAudioFile?.let { audioFile ->
+        AudioPlayerDialog(
+            file = audioFile,
+            onDismiss = { playingAudioFile = null }
+        )
+    }
+
+    playingVideoFile?.let { videoFile ->
+        VideoPlayerDialog(
+            file = videoFile,
+            onDismiss = { playingVideoFile = null }
+        )
+    }
+
+    viewingPdfFile?.let { pdfFile ->
+        PdfReaderDialog(
+            file = pdfFile,
+            onDismiss = { viewingPdfFile = null }
+        )
+    }
+
+    previewingZipFile?.let { zipFile ->
+        ZipPreviewDialog(
+            file = zipFile,
+            onDismiss = { previewingZipFile = null },
+            onExtract = {
+                viewModel.extractZip(zipFile)
+                previewingZipFile = null
+            }
+        )
+    }
+
+    movingTargetFile?.let { fileToMove ->
+        val rootDir = availableStorages.firstOrNull()?.rootDir ?: currentDir
+        MoveDestinationDialog(
+            initialDirectory = currentDir,
+            rootStorage = rootDir,
+            title = "Pindahkan '${fileToMove.name}'",
+            onDismiss = { movingTargetFile = null },
+            onSelectDestination = { destDir ->
+                viewModel.moveFile(fileToMove, destDir)
+                movingTargetFile = null
+            }
+        )
+    }
+
+    if (showRecentFoldersDialog) {
+        RecentFoldersDialog(
+            recentPaths = recentFolders,
+            onDismiss = { showRecentFoldersDialog = false },
+            onClearHistory = { viewModel.clearRecentFolders() },
+            onSelectFolder = { folder ->
+                viewModel.navigateTo(folder)
+                showRecentFoldersDialog = false
+            }
+        )
+    }
+
+    editingImageFile?.let { imgFile ->
+        ImageEditorDialog(
+            imageFile = imgFile,
+            onDismiss = { editingImageFile = null },
+            onSaved = {
+                editingImageFile = null
+                viewModel.refreshCurrentDir()
+                viewModel.notifySnackbar("Gambar berhasil disimpan!")
+            }
+        )
+    }
+
+    vaultLockTargetFile?.let { file ->
+        PinInputDialog(
+            title = "Kunci '${file.name}' ke Brankas",
+            subtitle = "Masukkan PIN untuk mengenkripsi file ini dengan AES-256",
+            confirmText = "Enkripsi & Kunci",
+            onDismiss = { vaultLockTargetFile = null },
+            onConfirm = { pin ->
+                viewModel.moveToSafeVault(file, pin)
+                vaultLockTargetFile = null
+            }
         )
     }
 }
 
-private fun handleItemClick(
+private fun handleFileClick(
+    context: Context,
     item: FileItem,
+    coroutineScope: CoroutineScope,
     viewModel: FileManagerViewModel,
-    activity: FragmentActivity?,
-    onFolderLocked: (File) -> Unit,
-    onDecrypt: (File) -> Unit,
-    onPreview: (File) -> Unit,
-    onOpen: (File) -> Unit
+    onViewImage: (File) -> Unit,
+    onPlayAudio: (File) -> Unit,
+    onPlayVideo: (File) -> Unit,
+    onViewPdf: (File) -> Unit,
+    onPreviewZip: (File) -> Unit,
+    onEditText: (File, String) -> Unit,
+    onEditImage: (File) -> Unit
 ) {
     if (item.isDirectory) {
-        val entered = viewModel.navigateTo(item.file)
-        if (!entered) {
-            // Folder is locked! Prompt authentication
-            onFolderLocked(item.file)
-        }
-    } else if (item.isEncrypted) {
-        // Encrypted AES file - prompt for decryption password
-        onDecrypt(item.file)
+        viewModel.navigateTo(item.file)
     } else {
-        // Document, media, audio, pdf - open with preview or external app
-        val ext = item.extension.lowercase()
-        val previewableExtensions = listOf(
-            "txt", "md", "json", "xml", "csv", "log", "kt", "java", "conf", "properties",
-            "jpg", "jpeg", "png", "webp", "gif", "bmp",
-            "mp3", "wav", "m4a", "ogg", "flac", "aac",
-            "pdf", "mp4", "mkv", "webm"
-        )
-        if (ext in previewableExtensions) {
-            onPreview(item.file)
-        } else {
-            onOpen(item.file)
+        when {
+            item.extension.equals("pdf", ignoreCase = true) -> {
+                onViewPdf(item.file)
+            }
+            item.fileType == FileType.IMAGE -> {
+                onViewImage(item.file)
+            }
+            item.fileType == FileType.AUDIO -> {
+                onPlayAudio(item.file)
+            }
+            item.fileType == FileType.VIDEO -> {
+                onPlayVideo(item.file)
+            }
+            item.fileType == FileType.ARCHIVE || item.extension.equals("zip", ignoreCase = true) -> {
+                onPreviewZip(item.file)
+            }
+            item.fileType == FileType.DOCUMENT || item.fileType == FileType.CODE -> {
+                if (item.extension.lowercase() in listOf("txt", "log", "json", "xml", "csv", "kt", "java", "py", "md", "html", "js", "css", "ini", "properties")) {
+                    coroutineScope.launch {
+                        val content = FileUtils.readTextFile(item.file)
+                        onEditText(item.file, content)
+                    }
+                } else {
+                    openWithExternalApp(context, item.file)
+                }
+            }
+            else -> {
+                openWithExternalApp(context, item.file)
+            }
+        }
+    }
+}
+
+private fun openWithExternalApp(context: Context, file: File) {
+    try {
+        val uri = FileProvider.getUriForFile(context, "com.aistudio.lishfile.kpmv.provider", file)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, FileUtils.getMimeType(file))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "Buka dengan"))
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+@Composable
+fun BreadcrumbHeader(
+    currentDir: File,
+    isAtRoot: Boolean,
+    canNavigateBack: Boolean,
+    canNavigateForward: Boolean,
+    onNavigateBack: () -> Unit,
+    onNavigateForward: () -> Unit,
+    onNavigateUp: () -> Unit,
+    onBackToCategories: () -> Unit,
+    onNavigateToPath: (File) -> Unit,
+    onShowRecentFolders: () -> Unit = {}
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+        ) {
+            // Row 1: Back to Categories pill + navigation arrows + history
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .clickable { onBackToCategories() }
+                        .testTag("back_to_categories_button")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Kembali ke Kategori",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Kategori",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                IconButton(
+                    onClick = onNavigateUp,
+                    enabled = !isAtRoot,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowUpward,
+                        contentDescription = "Ke Atas",
+                        modifier = Modifier.size(18.dp),
+                        tint = if (!isAtRoot) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                    )
+                }
+
+                IconButton(
+                    onClick = onNavigateBack,
+                    enabled = canNavigateBack,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Kembali",
+                        modifier = Modifier.size(18.dp),
+                        tint = if (canNavigateBack) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                    )
+                }
+
+                IconButton(
+                    onClick = onNavigateForward,
+                    enabled = canNavigateForward,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = "Maju",
+                        modifier = Modifier.size(18.dp),
+                        tint = if (canNavigateForward) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                IconButton(
+                    onClick = onShowRecentFolders,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.History,
+                        contentDescription = "Folder Terakhir",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Row 2: Breadcrumb path
+            val pathSegments = getPathSegments(currentDir)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                    modifier = Modifier.padding(end = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FolderOpen,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .padding(4.dp)
+                            .size(14.dp)
+                    )
+                }
+
+                pathSegments.forEachIndexed { index, (name, file) ->
+                    val isCurrent = index == pathSegments.lastIndex
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onNavigateToPath(file) }
+                    ) {
+                        Text(
+                            text = name,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium
+                            ),
+                            color = if (isCurrent) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
+                    }
+                    if (index < pathSegments.lastIndex) {
+                        Text(
+                            text = "›",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.padding(horizontal = 2.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun getPathSegments(dir: File): List<Pair<String, File>> {
+    val segments = mutableListOf<Pair<String, File>>()
+    var curr: File? = dir
+    while (curr != null) {
+        val name = if (curr.parent == null || curr.name.isEmpty()) "Root" else curr.name
+        segments.add(0, Pair(name, curr))
+        curr = curr.parentFile
+    }
+    return segments
+}
+
+@Composable
+fun FilterChipsRow(
+    selectedCategory: ViewCategory,
+    onSelectCategory: (ViewCategory) -> Unit,
+    sizeFilter: SizeFilter,
+    onSelectSizeFilter: (SizeFilter) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp)
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        ViewCategory.values().forEach { cat ->
+            FilterChip(
+                selected = selectedCategory == cat,
+                onClick = { onSelectCategory(cat) },
+                label = {
+                    Text(
+                        text = when (cat) {
+                            ViewCategory.ALL -> "Semua"
+                            ViewCategory.IMAGES -> "Gambar"
+                            ViewCategory.AUDIO -> "Audio"
+                            ViewCategory.VIDEOS -> "Video"
+                            ViewCategory.DOCUMENTS -> "Dokumen"
+                            ViewCategory.ARCHIVES -> "Arsip"
+                            ViewCategory.APKS -> "APK"
+                            ViewCategory.DOWNLOADS -> "Unduhan"
+                            else -> "Semua"
+                        },
+                        fontSize = 11.sp
+                    )
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun ClipboardBanner(
+    itemCount: Int,
+    isCut: Boolean,
+    onPaste: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "$itemCount item ${if (isCut) "dipotong" else "disalin"}",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+                )
+            }
+            Row {
+                Button(onClick = onPaste, modifier = Modifier.height(34.dp)) {
+                    Text("Tempel di Sini", fontSize = 12.sp)
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                OutlinedButton(onClick = onCancel, modifier = Modifier.height(34.dp)) {
+                    Text("Batal", fontSize = 12.sp)
+                }
+            }
         }
     }
 }

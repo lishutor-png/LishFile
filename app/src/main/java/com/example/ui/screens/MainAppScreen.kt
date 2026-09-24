@@ -1,23 +1,15 @@
 package com.example.ui.screens
 
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.WifiTethering
-import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.WifiTethering
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -32,15 +24,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.sp
-import androidx.fragment.app.FragmentActivity
-import com.example.ui.components.PinAuthDialog
-import com.example.ui.theme.AppThemeMode
+import com.example.ui.components.CompressZipDialog
+import com.example.ui.components.LishFileTopBar
+import com.example.ui.components.MoveDestinationDialog
+import com.example.util.FileUtils
 import com.example.viewmodel.FileManagerViewModel
 import kotlinx.coroutines.flow.collectLatest
+import java.io.File
 
-enum class NavigationTab {
+enum class MainNavTab {
     EXPLORER,
+    VAULT,
     TRANSFER,
     SETTINGS
 }
@@ -48,189 +42,181 @@ enum class NavigationTab {
 @Composable
 fun MainAppScreen(
     viewModel: FileManagerViewModel,
-    themeMode: AppThemeMode,
-    onThemeToggle: () -> Unit
+    onTriggerBiometrics: () -> Unit
 ) {
     val context = LocalContext.current
-    val activity = context as? FragmentActivity
+    var currentTab by remember { mutableStateOf(MainNavTab.EXPLORER) }
     val snackbarHostState = remember { SnackbarHostState() }
-    var currentTab by remember { mutableStateOf(NavigationTab.EXPLORER) }
 
-    // Vault overlay/screen state
-    var isVaultOpen by remember { mutableStateOf(false) }
-    var showVaultAuthDialog by remember { mutableStateOf(false) }
-    var showVaultSetPinDialog by remember { mutableStateOf(false) }
+    var logoClickCount by remember { mutableStateOf(0) }
+    var lastLogoClickTime by remember { mutableStateOf(0L) }
 
-    val isVaultUnlocked by viewModel.securityManager.isVaultUnlocked.collectAsState()
-    val hasMasterPin by viewModel.preferences.hasMasterPin.collectAsState()
-
-    // Function triggered when user clicks the LishFile logo
-    val onLogoClick: () -> Unit = {
-        if (isVaultUnlocked) {
-            isVaultOpen = true
-        } else if (!hasMasterPin) {
-            // First time clicking logo: prompt user to set Master Password/PIN
-            showVaultSetPinDialog = true
+    val handleLogoClick: () -> Unit = {
+        val now = System.currentTimeMillis()
+        if (now - lastLogoClickTime < 1500) {
+            logoClickCount++
         } else {
-            // Prompt to authenticate with PIN or Biometrics
-            showVaultAuthDialog = true
+            logoClickCount = 1
+        }
+        lastLogoClickTime = now
+
+        if (logoClickCount >= 3) {
+            logoClickCount = 0
+            currentTab = MainNavTab.VAULT
+            viewModel.notifySnackbar("Membuka Brankas Aman...")
         }
     }
 
-    // Listen to ViewModel snackbar events
+    BackHandler(enabled = currentTab == MainNavTab.VAULT) {
+        currentTab = MainNavTab.EXPLORER
+    }
+
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    var isSearchActive by remember { mutableStateOf(false) }
+    val isGridView by viewModel.preferences.isGridView.collectAsState()
+    val showHiddenFiles by viewModel.preferences.showHiddenFiles.collectAsState()
+    val isMultiSelectMode by viewModel.isMultiSelectMode.collectAsState()
+    val selectedPaths by viewModel.selectedPaths.collectAsState()
+    val allFiles by viewModel.allFilesInCurrentDir.collectAsState()
+    val searchEntireStorage by viewModel.searchEntireStorage.collectAsState()
+    val extensionFilter by viewModel.extensionFilter.collectAsState()
+    val sizeFilter by viewModel.sizeFilter.collectAsState()
+    val availableStorages by viewModel.availableStorages.collectAsState()
+    val currentDir by viewModel.currentDir.collectAsState()
+
+    var showMoveSelectedDialog by remember { mutableStateOf(false) }
+    var showZipSelectedDialog by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         viewModel.snackbarMessage.collectLatest { msg ->
             snackbarHostState.showSnackbar(msg)
         }
     }
 
-    // Intercept back button when in vault or subfolder
-    val currentDir by viewModel.currentDir.collectAsState()
-    val isRoot = currentDir.absolutePath == viewModel.primaryRootDir.absolutePath
-
-    BackHandler(enabled = isVaultOpen) {
-        isVaultOpen = false
-    }
-
-    BackHandler(enabled = !isVaultOpen && currentTab == NavigationTab.EXPLORER && !isRoot) {
-        viewModel.navigateUp()
-    }
-
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        bottomBar = {
-            if (!isVaultOpen) {
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onSurface
-                ) {
-                    NavigationBarItem(
-                        selected = currentTab == NavigationTab.EXPLORER,
-                        onClick = { currentTab = NavigationTab.EXPLORER },
-                        icon = {
-                            Icon(
-                                if (currentTab == NavigationTab.EXPLORER) Icons.Filled.Folder else Icons.Outlined.Folder,
-                                contentDescription = "File Manager"
-                            )
-                        },
-                        label = { Text("Berkas", fontSize = 11.sp) },
-                        modifier = Modifier.testTag("nav_item_explorer"),
-                        colors = NavigationBarItemDefaults.colors(
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-
-                    NavigationBarItem(
-                        selected = currentTab == NavigationTab.TRANSFER,
-                        onClick = { currentTab = NavigationTab.TRANSFER },
-                        icon = {
-                            Icon(
-                                if (currentTab == NavigationTab.TRANSFER) Icons.Filled.WifiTethering else Icons.Outlined.WifiTethering,
-                                contentDescription = "Transfer Lokal"
-                            )
-                        },
-                        label = { Text("Transfer P2P", fontSize = 11.sp) },
-                        modifier = Modifier.testTag("nav_item_transfer"),
-                        colors = NavigationBarItemDefaults.colors(
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-
-                    NavigationBarItem(
-                        selected = currentTab == NavigationTab.SETTINGS,
-                        onClick = { currentTab = NavigationTab.SETTINGS },
-                        icon = {
-                            Icon(
-                                if (currentTab == NavigationTab.SETTINGS) Icons.Filled.Settings else Icons.Outlined.Settings,
-                                contentDescription = "Pengaturan"
-                            )
-                        },
-                        label = { Text("Pengaturan", fontSize = 11.sp) },
-                        modifier = Modifier.testTag("nav_item_settings"),
-                        colors = NavigationBarItemDefaults.colors(
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-                }
-            }
-        }
-    ) { innerPadding ->
-        androidx.compose.foundation.layout.Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            if (isVaultOpen) {
-                SafeVaultScreen(
-                    viewModel = viewModel,
-                    onBackClick = { isVaultOpen = false }
+        modifier = Modifier.fillMaxSize(),
+        topBar = {
+            if (currentTab == MainNavTab.EXPLORER) {
+                LishFileTopBar(
+                    title = "LishFile",
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { viewModel.setSearchQuery(it) },
+                    isSearchActive = isSearchActive,
+                    onToggleSearch = {
+                        isSearchActive = !isSearchActive
+                        if (!isSearchActive) {
+                            viewModel.setSearchQuery("")
+                            viewModel.setExtensionFilter(null)
+                        }
+                    },
+                    isGridView = isGridView,
+                    onToggleGridView = { viewModel.preferences.setGridView(!isGridView) },
+                    showHiddenFiles = showHiddenFiles,
+                    onToggleHiddenFiles = {
+                        viewModel.preferences.setShowHiddenFiles(!showHiddenFiles)
+                        viewModel.refreshCurrentDir()
+                    },
+                    onSortChange = { by, order -> viewModel.setSorting(by, order) },
+                    isMultiSelect = isMultiSelectMode,
+                    selectedCount = selectedPaths.size,
+                    onSelectAll = { viewModel.selectAll(allFiles) },
+                    onClearSelection = { viewModel.clearSelection() },
+                    onCopySelected = { viewModel.copySelected() },
+                    onCutSelected = { viewModel.cutSelected() },
+                    onMoveSelected = { showMoveSelectedDialog = true },
+                    onShareSelected = {
+                        val filesToShare = selectedPaths.map { File(it) }
+                        FileUtils.shareMultipleFiles(context, filesToShare)
+                    },
+                    onZipSelected = { showZipSelectedDialog = true },
+                    onDeleteSelected = { viewModel.deleteSelected() },
+                    searchEntireStorage = searchEntireStorage,
+                    onToggleSearchEntireStorage = { viewModel.toggleSearchEntireStorage() },
+                    selectedExtension = extensionFilter,
+                    onSelectExtension = { viewModel.setExtensionFilter(it) },
+                    selectedSizeFilter = sizeFilter,
+                    onSelectSizeFilter = { viewModel.setSizeFilter(it) },
+                    onLogoClick = handleLogoClick
                 )
-            } else {
-                when (currentTab) {
-                    NavigationTab.EXPLORER -> FileManagerScreen(
-                        viewModel = viewModel,
-                        themeMode = themeMode,
-                        onThemeToggle = onThemeToggle,
-                        onOpenVault = onLogoClick
+            }
+        },
+        bottomBar = {
+            if (currentTab != MainNavTab.VAULT) {
+                NavigationBar(modifier = Modifier.testTag("bottom_nav_bar")) {
+                    NavigationBarItem(
+                        selected = currentTab == MainNavTab.EXPLORER,
+                        onClick = { currentTab = MainNavTab.EXPLORER },
+                        icon = { Icon(Icons.Default.Folder, contentDescription = "Berkas") },
+                        label = { Text("Berkas") },
+                        modifier = Modifier.testTag("nav_tab_explorer")
                     )
-                    NavigationTab.TRANSFER -> LocalTransferScreen(
-                        viewModel = viewModel
+                    NavigationBarItem(
+                        selected = currentTab == MainNavTab.TRANSFER,
+                        onClick = { currentTab = MainNavTab.TRANSFER },
+                        icon = { Icon(Icons.Default.Wifi, contentDescription = "Transfer P2P") },
+                        label = { Text("Transfer") },
+                        modifier = Modifier.testTag("nav_tab_transfer")
                     )
-                    NavigationTab.SETTINGS -> SettingsScreen(
-                        viewModel = viewModel,
-                        themeMode = themeMode,
-                        onThemeChange = { viewModel.setThemeMode(it) }
+                    NavigationBarItem(
+                        selected = currentTab == MainNavTab.SETTINGS,
+                        onClick = { currentTab = MainNavTab.SETTINGS },
+                        icon = { Icon(Icons.Default.Settings, contentDescription = "Pengaturan") },
+                        label = { Text("Pengaturan") },
+                        modifier = Modifier.testTag("nav_tab_settings")
                     )
                 }
             }
+        },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
+    ) { paddingValues ->
+        val mod = Modifier.padding(paddingValues)
+        when (currentTab) {
+            MainNavTab.EXPLORER -> FileManagerScreen(
+                viewModel = viewModel,
+                onOpenVault = { currentTab = MainNavTab.VAULT },
+                modifier = mod
+            )
+            MainNavTab.VAULT -> SafeVaultScreen(
+                viewModel = viewModel,
+                onTriggerBiometrics = onTriggerBiometrics,
+                onExitVault = { currentTab = MainNavTab.EXPLORER },
+                modifier = mod
+            )
+            MainNavTab.TRANSFER -> LocalTransferScreen(
+                viewModel = viewModel,
+                modifier = mod
+            )
+            MainNavTab.SETTINGS -> SettingsScreen(
+                viewModel = viewModel,
+                modifier = mod
+            )
         }
     }
 
-    // Dialog for setting master PIN for the first time when clicking LishFile logo
-    if (showVaultSetPinDialog) {
-        PinAuthDialog(
-            title = "Atur Kata Sandi / PIN Pertama Kali",
-            subtitle = "Anda baru pertama kali mengakses folder terkunci. Buat PIN atau kata sandi untuk melindungi Safe Vault Anda (dapat diubah nanti di Pengaturan).",
-            canUseBiometric = false,
-            onDismiss = { showVaultSetPinDialog = false },
-            onPinSubmit = { pin ->
-                viewModel.preferences.setMasterPin(pin)
-                viewModel.securityManager.unlockVault()
-                showVaultSetPinDialog = false
-                isVaultOpen = true
-            },
-            onBiometricClick = {}
+    if (showMoveSelectedDialog) {
+        val rootDir = availableStorages.firstOrNull()?.rootDir ?: currentDir
+        MoveDestinationDialog(
+            initialDirectory = currentDir,
+            rootStorage = rootDir,
+            title = "Pindahkan ${selectedPaths.size} File Dipilih",
+            onDismiss = { showMoveSelectedDialog = false },
+            onSelectDestination = { destFolder ->
+                viewModel.moveSelectedTo(destFolder)
+                showMoveSelectedDialog = false
+            }
         )
     }
 
-    // Dialog for authenticating to access Safe Vault via logo
-    if (showVaultAuthDialog) {
-        PinAuthDialog(
-            title = "Buka Berkas Terkunci",
-            subtitle = "Masukkan PIN atau gunakan Sidik Jari untuk membuka Safe Vault",
-            canUseBiometric = viewModel.securityManager.canUseBiometric(),
-            onDismiss = { showVaultAuthDialog = false },
-            onPinSubmit = { pin ->
-                viewModel.unlockVaultWithMasterPin(pin) {
-                    showVaultAuthDialog = false
-                    isVaultOpen = true
-                }
-            },
-            onBiometricClick = {
-                if (activity != null) {
-                    viewModel.unlockWithBiometrics(activity, null) {
-                        showVaultAuthDialog = false
-                        isVaultOpen = true
-                    }
-                }
+    if (showZipSelectedDialog) {
+        val files = selectedPaths.map { File(it) }
+        CompressZipDialog(
+            defaultZipName = "Arsip_${System.currentTimeMillis()}.zip",
+            onDismiss = { showZipSelectedDialog = false },
+            onConfirm = { zipName ->
+                viewModel.compressToZip(files, zipName)
+                showZipSelectedDialog = false
+                viewModel.clearSelection()
             }
         )
     }
 }
-

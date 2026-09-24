@@ -2,12 +2,9 @@ package com.example.crypto
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -19,192 +16,157 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 object AesCryptoEngine {
-
-    private const val MAGIC_HEADER = "LISHFILE_V1"
-    private val MAGIC_BYTES = MAGIC_HEADER.toByteArray(StandardCharsets.UTF_8)
+    private const val MAGIC_HEADER = "LISHFILE_ENC_V1"
+    private const val ITERATIONS = 10000
+    private const val KEY_LENGTH = 256
     private const val SALT_LENGTH = 16
     private const val IV_LENGTH = 16
-    private const val KEY_LENGTH_BITS = 256
-    private const val PBKDF2_ITERATIONS = 10_000
-    private const val BUFFER_SIZE = 64 * 1024 // 64 KB streaming buffer for large file optimization
-
-    data class CryptoProgress(
-        val bytesProcessed: Long,
-        val totalBytes: Long,
-        val percent: Int
-    )
 
     suspend fun encryptFile(
         inputFile: File,
         outputFile: File,
-        password: String,
-        onProgress: ((CryptoProgress) -> Unit)? = null
+        pinOrPassword: String,
+        onProgress: ((Float) -> Unit)? = null
     ): Boolean = withContext(Dispatchers.IO) {
-        val totalSize = inputFile.length()
-        var processedSize = 0L
+        try {
+            val salt = ByteArray(SALT_LENGTH)
+            val iv = ByteArray(IV_LENGTH)
+            val random = SecureRandom()
+            random.nextBytes(salt)
+            random.nextBytes(iv)
 
-        val salt = ByteArray(SALT_LENGTH)
-        val iv = ByteArray(IV_LENGTH)
-        val secureRandom = SecureRandom()
-        secureRandom.nextBytes(salt)
-        secureRandom.nextBytes(iv)
+            val secretKey = deriveKey(pinOrPassword, salt)
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey, IvParameterSpec(iv))
 
-        val secretKey = deriveKey(password, salt)
-        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-        cipher.init(Cipher.ENCRYPT_MODE, secretKey, IvParameterSpec(iv))
+            outputFile.parentFile?.mkdirs()
+            val totalBytes = inputFile.length()
+            var bytesProcessed = 0L
 
-        val origNameBytes = inputFile.name.toByteArray(StandardCharsets.UTF_8)
+            FileOutputStream(outputFile).use { fos ->
+                fos.write(MAGIC_HEADER.toByteArray(Charsets.UTF_8))
+                fos.write(salt)
+                fos.write(iv)
 
-        BufferedOutputStream(FileOutputStream(outputFile), BUFFER_SIZE).use { bos ->
-            // Write Magic header
-            bos.write(MAGIC_BYTES)
-            // Write Salt & IV
-            bos.write(salt)
-            bos.write(iv)
-            // Write original filename length (2 bytes) + original filename
-            bos.write((origNameBytes.size shr 8) and 0xFF)
-            bos.write(origNameBytes.size and 0xFF)
-            bos.write(origNameBytes)
-
-            // Write Cipher Stream
-            CipherOutputStream(bos, cipher).use { cos ->
-                BufferedInputStream(FileInputStream(inputFile), BUFFER_SIZE).use { bis ->
-                    val buffer = ByteArray(BUFFER_SIZE)
-                    var read: Int
-                    while (bis.read(buffer).also { read = it } != -1) {
-                        cos.write(buffer, 0, read)
-                        processedSize += read
-                        val percent = if (totalSize > 0) ((processedSize * 100) / totalSize).toInt() else 100
-                        onProgress?.invoke(CryptoProgress(processedSize, totalSize, percent))
+                CipherOutputStream(fos, cipher).use { cos ->
+                    FileInputStream(inputFile).use { fis ->
+                        val buffer = ByteArray(8192)
+                        var read: Int
+                        while (fis.read(buffer).also { read = it } != -1) {
+                            cos.write(buffer, 0, read)
+                            bytesProcessed += read
+                            if (totalBytes > 0) {
+                                onProgress?.invoke(bytesProcessed.toFloat() / totalBytes)
+                            }
+                        }
                     }
-                    cos.flush()
                 }
             }
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            outputFile.delete()
+            false
         }
-        true
     }
 
     suspend fun decryptFile(
         inputFile: File,
-        outputDirectory: File,
-        password: String,
-        customOutputName: String? = null,
-        onProgress: ((CryptoProgress) -> Unit)? = null
-    ): File? = withContext(Dispatchers.IO) {
-        val totalSize = inputFile.length()
-        var processedSize = 0L
+        outputFile: File,
+        pinOrPassword: String,
+        onProgress: ((Float) -> Unit)? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            outputFile.parentFile?.mkdirs()
+            val totalBytes = inputFile.length()
+            var bytesProcessed = 0L
 
-        BufferedInputStream(FileInputStream(inputFile), BUFFER_SIZE).use { bis ->
-            // Check Magic Header
-            val header = ByteArray(MAGIC_BYTES.size)
-            val readHeader = bis.read(header)
-            if (readHeader != MAGIC_BYTES.size || !header.contentEquals(MAGIC_BYTES)) {
-                throw IllegalArgumentException("Not a valid LishFile encrypted file or corrupt header")
-            }
+            FileInputStream(inputFile).use { fis ->
+                val headerBytes = ByteArray(MAGIC_HEADER.toByteArray(Charsets.UTF_8).size)
+                fis.read(headerBytes)
+                val header = String(headerBytes, Charsets.UTF_8)
+                if (header != MAGIC_HEADER) {
+                    return@withContext false
+                }
 
-            val salt = ByteArray(SALT_LENGTH)
-            if (bis.read(salt) != SALT_LENGTH) throw IllegalArgumentException("Invalid file: Salt missing")
+                val salt = ByteArray(SALT_LENGTH)
+                val iv = ByteArray(IV_LENGTH)
+                fis.read(salt)
+                fis.read(iv)
 
-            val iv = ByteArray(IV_LENGTH)
-            if (bis.read(iv) != IV_LENGTH) throw IllegalArgumentException("Invalid file: IV missing")
+                val secretKey = deriveKey(pinOrPassword, salt)
+                val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+                cipher.init(Cipher.DECRYPT_MODE, secretKey, IvParameterSpec(iv))
 
-            // Read original filename
-            val high = bis.read()
-            val low = bis.read()
-            if (high == -1 || low == -1) throw IllegalArgumentException("Invalid file: filename length missing")
-            val nameLen = (high shl 8) or low
-            val nameBytes = ByteArray(nameLen)
-            if (bis.read(nameBytes) != nameLen) throw IllegalArgumentException("Invalid file: corrupt filename")
-            val originalName = String(nameBytes, StandardCharsets.UTF_8)
-
-            val secretKey = deriveKey(password, salt)
-            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-            cipher.init(Cipher.DECRYPT_MODE, secretKey, IvParameterSpec(iv))
-
-            val targetFileName = customOutputName ?: originalName
-            var targetFile = File(outputDirectory, targetFileName)
-            if (targetFile.exists()) {
-                val base = targetFile.nameWithoutExtension
-                val ext = if (targetFile.extension.isNotEmpty()) ".${targetFile.extension}" else ""
-                targetFile = File(outputDirectory, "${base}_decrypted_${System.currentTimeMillis() % 10000}$ext")
-            }
-
-            CipherInputStream(bis, cipher).use { cis ->
-                BufferedOutputStream(FileOutputStream(targetFile), BUFFER_SIZE).use { bos ->
-                    val buffer = ByteArray(BUFFER_SIZE)
-                    var read: Int
-                    while (cis.read(buffer).also { read = it } != -1) {
-                        bos.write(buffer, 0, read)
-                        processedSize += read
-                        val percent = if (totalSize > 0) ((processedSize * 100) / totalSize).toInt().coerceIn(0, 100) else 100
-                        onProgress?.invoke(CryptoProgress(processedSize, totalSize, percent))
+                CipherInputStream(fis, cipher).use { cis ->
+                    FileOutputStream(outputFile).use { fos ->
+                        val buffer = ByteArray(8192)
+                        var read: Int
+                        while (cis.read(buffer).also { read = it } != -1) {
+                            fos.write(buffer, 0, read)
+                            bytesProcessed += read
+                            if (totalBytes > 0) {
+                                onProgress?.invoke(bytesProcessed.toFloat() / totalBytes)
+                            }
+                        }
                     }
-                    bos.flush()
                 }
             }
-
-            targetFile
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            outputFile.delete()
+            false
         }
     }
 
-    fun isLishEncrypted(file: File): Boolean {
-        if (!file.exists() || file.isDirectory || file.length() < MAGIC_BYTES.size + SALT_LENGTH + IV_LENGTH + 2) {
-            return false
-        }
+    fun isEncryptedFile(file: File): Boolean {
+        if (!file.exists() || file.isDirectory || file.length() < 50) return false
         return try {
             FileInputStream(file).use { fis ->
-                val header = ByteArray(MAGIC_BYTES.size)
-                val read = fis.read(header)
-                read == MAGIC_BYTES.size && header.contentEquals(MAGIC_BYTES)
+                val headerBytes = ByteArray(MAGIC_HEADER.toByteArray(Charsets.UTF_8).size)
+                val read = fis.read(headerBytes)
+                if (read == headerBytes.size) {
+                    String(headerBytes, Charsets.UTF_8) == MAGIC_HEADER
+                } else false
             }
-        } catch (_: Exception) {
-            file.name.endsWith(".lish", ignoreCase = true)
+        } catch (e: Exception) {
+            false
         }
-    }
-
-    fun deriveKey(password: String, salt: ByteArray): SecretKeySpec {
-        val spec = PBEKeySpec(password.toCharArray(), salt, PBKDF2_ITERATIONS, KEY_LENGTH_BITS)
-        val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-        val keyBytes = factory.generateSecret(spec).encoded
-        return SecretKeySpec(keyBytes, "AES")
-    }
-
-    fun hashPassword(password: String, salt: String): String {
-        val md = MessageDigest.getInstance("SHA-256")
-        md.update(salt.toByteArray(StandardCharsets.UTF_8))
-        val digest = md.digest(password.toByteArray(StandardCharsets.UTF_8))
-        return bytesToHex(digest)
-    }
-
-    fun generateSalt(): String {
-        val bytes = ByteArray(16)
-        SecureRandom().nextBytes(bytes)
-        return bytesToHex(bytes)
     }
 
     suspend fun calculateChecksum(file: File, algorithm: String = "SHA-256"): String = withContext(Dispatchers.IO) {
-        if (!file.exists() || file.isDirectory) return@withContext ""
-        val md = MessageDigest.getInstance(algorithm)
-        FileInputStream(file).use { fis ->
-            val buffer = ByteArray(BUFFER_SIZE)
-            var read: Int
-            while (fis.read(buffer).also { read = it } != -1) {
-                md.update(buffer, 0, read)
+        try {
+            val digest = MessageDigest.getInstance(algorithm)
+            FileInputStream(file).use { fis ->
+                val buffer = ByteArray(8192)
+                var read: Int
+                while (fis.read(buffer).also { read = it } != -1) {
+                    digest.update(buffer, 0, read)
+                }
             }
+            digest.digest().joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            ""
         }
-        bytesToHex(md.digest())
     }
 
-    suspend fun calculateMd5(file: File): String = calculateChecksum(file, "MD5")
+    fun generateSalt(): String {
+        val salt = ByteArray(SALT_LENGTH)
+        SecureRandom().nextBytes(salt)
+        return salt.joinToString("") { "%02x".format(it) }
+    }
 
-    private fun bytesToHex(bytes: ByteArray): String {
-        val hexChars = CharArray(bytes.size * 2)
-        val hexArray = "0123456789ABCDEF".toCharArray()
-        for (i in bytes.indices) {
-            val v = bytes[i].toInt() and 0xFF
-            hexChars[i * 2] = hexArray[v ushr 4]
-            hexChars[i * 2 + 1] = hexArray[v and 0x0F]
-        }
-        return String(hexChars)
+    fun hashPassword(password: String, saltHex: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val combined = "$password:$saltHex".toByteArray(Charsets.UTF_8)
+        return digest.digest(combined).joinToString("") { "%02x".format(it) }
+    }
+
+    private fun deriveKey(pinOrPassword: String, salt: ByteArray): SecretKeySpec {
+        val spec = PBEKeySpec(pinOrPassword.toCharArray(), salt, ITERATIONS, KEY_LENGTH)
+        val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        val keyBytes = factory.generateSecret(spec).encoded
+        return SecretKeySpec(keyBytes, "AES")
     }
 }

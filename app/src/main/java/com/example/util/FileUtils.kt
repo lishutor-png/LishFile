@@ -1,219 +1,109 @@
 package com.example.util
 
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.webkit.MimeTypeMap
-import android.widget.Toast
 import androidx.core.content.FileProvider
-import com.example.model.FileItem
+import com.example.model.FileType
+import com.example.model.ZipEntryItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
-data class StorageVolumeInfo(
-    val name: String,
-    val path: File,
-    val isRemovable: Boolean,
-    val totalBytes: Long,
-    val freeBytes: Long
-)
-
 object FileUtils {
 
-    private const val BUFFER_SIZE = 64 * 1024 // 64 KB buffered I/O
+    fun formatFileSize(bytes: Long): String {
+        if (bytes <= 0) return "0 B"
+        if (bytes < 1024) return "$bytes B"
+        val units = arrayOf("B", "KB", "MB", "GB", "TB")
+        val digitGroups = (Math.log10(bytes.toDouble()) / Math.log10(1024.0)).toInt()
+        val index = digitGroups.coerceIn(0, units.lastIndex)
+        val value = bytes / Math.pow(1024.0, index.toDouble())
+        return String.format(Locale.US, "%.1f %s", value, units[index])
+    }
+
+    fun formatDate(timestamp: Long): String {
+        if (timestamp <= 0) return "-"
+        val sdf = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault())
+        return sdf.format(Date(timestamp))
+    }
+
+    fun getFileType(file: File): FileType {
+        if (file.isDirectory) return FileType.FOLDER
+        val ext = file.extension.lowercase()
+        return when (ext) {
+            "jpg", "jpeg", "png", "gif", "bmp", "webp", "heic", "svg" -> FileType.IMAGE
+            "mp3", "wav", "flac", "m4a", "aac", "ogg", "wma", "opus" -> FileType.AUDIO
+            "mp4", "mkv", "avi", "mov", "flv", "wmv", "webm", "3gp" -> FileType.VIDEO
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "odt", "csv" -> FileType.DOCUMENT
+            "zip", "rar", "7z", "tar", "gz", "bz2", "xz" -> FileType.ARCHIVE
+            "apk", "xapk", "apks" -> FileType.APK
+            "kt", "java", "py", "js", "html", "css", "json", "xml", "cpp", "c", "h", "cs", "php", "sql", "sh" -> FileType.CODE
+            else -> FileType.OTHER
+        }
+    }
+
+    private val mimeTypeFallback = mapOf(
+        "png" to "image/png",
+        "jpg" to "image/jpeg",
+        "jpeg" to "image/jpeg",
+        "gif" to "image/gif",
+        "webp" to "image/webp",
+        "svg" to "image/svg+xml",
+        "pdf" to "application/pdf",
+        "zip" to "application/zip",
+        "txt" to "text/plain",
+        "json" to "application/json",
+        "xml" to "application/xml",
+        "mp3" to "audio/mpeg",
+        "mp4" to "video/mp4",
+        "apk" to "application/vnd.android.package-archive"
+    )
 
     fun getMimeType(file: File): String {
-        val extension = file.extension.lowercase(Locale.ROOT)
-        if (extension.isEmpty()) return "*/*"
-        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
-        return mime ?: when (extension) {
-            "pdf" -> "application/pdf"
-            "txt", "log", "md" -> "text/plain"
-            "json" -> "application/json"
-            "xml" -> "text/xml"
-            "html", "htm" -> "text/html"
-            "csv" -> "text/csv"
-            "lish", "aes" -> "application/octet-stream"
-            "zip" -> "application/zip"
-            "rar" -> "application/x-rar-compressed"
-            "7z" -> "application/x-7z-compressed"
-            "apk" -> "application/vnd.android.package-archive"
-            "doc" -> "application/msword"
-            "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            "xls" -> "application/vnd.ms-excel"
-            "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            "ppt" -> "application/vnd.ms-powerpoint"
-            "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            "mp3" -> "audio/mpeg"
-            "wav" -> "audio/x-wav"
-            "mp4" -> "video/mp4"
-            "jpg", "jpeg" -> "image/jpeg"
-            "png" -> "image/png"
-            else -> "*/*"
+        val extension = file.extension.lowercase()
+        mimeTypeFallback[extension]?.let { return it }
+        return try {
+            MimeTypeMap.getSingleton()?.getMimeTypeFromExtension(extension) ?: "*/*"
+        } catch (e: Throwable) {
+            "*/*"
         }
     }
 
-    fun openFileWithExternalApp(context: Context, file: File) {
-        if (!file.exists()) {
-            Toast.makeText(context, "File tidak ditemukan", Toast.LENGTH_SHORT).show()
-            return
-        }
+    suspend fun createFolder(parentDir: File, folderName: String): Boolean = withContext(Dispatchers.IO) {
+        val newDir = File(parentDir, folderName)
+        if (!newDir.exists()) newDir.mkdirs() else false
+    }
 
+    suspend fun createTextFile(parentDir: File, fileName: String, content: String = ""): Boolean = withContext(Dispatchers.IO) {
+        val newFile = File(parentDir, fileName)
         try {
-            val authority = "${context.packageName}.provider"
-            val uri: Uri = FileProvider.getUriForFile(context, authority, file)
-            val mimeType = getMimeType(file)
-
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, mimeType)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-
-            val chooser = Intent.createChooser(intent, "Buka dengan aplikasi")
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(chooser)
-        } catch (e: ActivityNotFoundException) {
-            Toast.makeText(context, "Tidak ada aplikasi yang dapat membuka file ini", Toast.LENGTH_LONG).show()
+            if (!newFile.exists()) {
+                newFile.createNewFile()
+                newFile.writeText(content)
+                true
+            } else false
         } catch (e: Exception) {
-            Toast.makeText(context, "Gagal membuka file: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    fun shareFileViaBluetoothOrSystem(context: Context, file: File) {
-        if (!file.exists()) return
-
-        try {
-            val authority = "${context.packageName}.provider"
-            val uri: Uri = FileProvider.getUriForFile(context, authority, file)
-            val mimeType = getMimeType(file)
-
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = mimeType
-                putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, file.name)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-
-            val chooser = Intent.createChooser(shareIntent, "Kirim via Bluetooth / Jaringan")
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(chooser)
-        } catch (e: Exception) {
-            Toast.makeText(context, "Gagal membagikan file: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    suspend fun copyFileOrDirectory(
-        src: File,
-        destDir: File,
-        onProgress: ((copied: Long, total: Long) -> Unit)? = null
-    ): Boolean = withContext(Dispatchers.IO) {
-        if (!src.exists()) return@withContext false
-        if (!destDir.exists()) destDir.mkdirs()
-
-        if (src.isDirectory) {
-            val targetDir = File(destDir, src.name)
-            if (!targetDir.exists()) targetDir.mkdirs()
-            val children = src.listFiles() ?: return@withContext true
-            for (child in children) {
-                copyFileOrDirectory(child, targetDir, onProgress)
-            }
-            true
-        } else {
-            var targetFile = File(destDir, src.name)
-            if (targetFile.exists()) {
-                val base = src.nameWithoutExtension
-                val ext = if (src.extension.isNotEmpty()) ".${src.extension}" else ""
-                targetFile = File(destDir, "${base}_copy$ext")
-            }
-
-            val totalSize = src.length()
-            var copied = 0L
-
-            BufferedInputStream(FileInputStream(src), BUFFER_SIZE).use { bis ->
-                BufferedOutputStream(FileOutputStream(targetFile), BUFFER_SIZE).use { bos ->
-                    val buffer = ByteArray(BUFFER_SIZE)
-                    var read: Int
-                    while (bis.read(buffer).also { read = it } != -1) {
-                        bos.write(buffer, 0, read)
-                        copied += read
-                        onProgress?.invoke(copied, totalSize)
-                    }
-                    bos.flush()
-                }
-            }
-            true
-        }
-    }
-
-    suspend fun moveFileOrDirectory(src: File, destDir: File): Boolean = withContext(Dispatchers.IO) {
-        if (!src.exists()) return@withContext false
-        if (!destDir.exists()) destDir.mkdirs()
-
-        val destFile = File(destDir, src.name)
-        // Try atomic rename first
-        if (src.renameTo(destFile)) {
-            return@withContext true
-        }
-
-        // Fallback: Copy and delete original
-        val copied = copyFileOrDirectory(src, destDir)
-        if (copied) {
-            deleteRecursive(src)
-            true
-        } else {
+            e.printStackTrace()
             false
         }
     }
 
-    suspend fun renameFileOrFolder(src: File, newName: String): File? = withContext(Dispatchers.IO) {
-        if (!src.exists() || newName.isBlank()) return@withContext null
-        val target = File(src.parentFile, newName)
-        if (target.exists()) return@withContext null
-        if (src.renameTo(target)) target else null
-    }
-
-    suspend fun deleteRecursive(file: File): Boolean = withContext(Dispatchers.IO) {
-        if (!file.exists()) return@withContext true
-        if (file.isDirectory) {
-            file.listFiles()?.forEach { deleteRecursive(it) }
-        }
-        file.delete()
-    }
-
-    suspend fun createNewFolder(parentDir: File, folderName: String): File? = withContext(Dispatchers.IO) {
-        val folder = File(parentDir, folderName)
-        if (folder.exists()) return@withContext null
-        if (folder.mkdirs()) folder else null
-    }
-
-    suspend fun createTextFile(parentDir: File, fileName: String, content: String): File? = withContext(Dispatchers.IO) {
-        val fullFileName = if (fileName.contains(".")) fileName else "$fileName.txt"
-        val file = File(parentDir, fullFileName)
-        if (file.exists()) return@withContext null
-        FileOutputStream(file).use { fos ->
-            fos.write(content.toByteArray())
-            fos.flush()
-        }
-        file
-    }
-
     suspend fun readTextFile(file: File): String = withContext(Dispatchers.IO) {
-        if (!file.exists() || file.length() > 5 * 1024 * 1024) {
-            return@withContext "File terlalu besar untuk ditampilkan di editor teks (maks 5MB)."
+        try {
+            file.readText()
+        } catch (e: Exception) {
+            "Gagal membaca file: ${e.message}"
         }
-        file.readText()
     }
 
     suspend fun saveTextFile(file: File, content: String): Boolean = withContext(Dispatchers.IO) {
@@ -225,52 +115,58 @@ object FileUtils {
         }
     }
 
-    suspend fun createZipArchive(
-        files: List<File>,
-        destZipFile: File,
-        onProgress: ((currentFile: String, percent: Int) -> Unit)? = null
-    ): Boolean = withContext(Dispatchers.IO) {
+    suspend fun renameFile(file: File, newName: String): Boolean = withContext(Dispatchers.IO) {
+        val target = File(file.parentFile, newName)
+        if (target.exists()) false else file.renameTo(target)
+    }
+
+    suspend fun deleteRecursive(file: File): Boolean = withContext(Dispatchers.IO) {
         try {
-            if (destZipFile.exists()) destZipFile.delete()
-            val allFiles = mutableListOf<Pair<File, String>>()
-            for (rootFile in files) {
-                if (rootFile.isDirectory) {
-                    rootFile.walkTopDown().forEach { f ->
-                        val relPath = rootFile.name + "/" + f.relativeTo(rootFile).path.replace('\\', '/')
-                        allFiles.add(Pair(f, if (f.isDirectory) "$relPath/" else relPath))
-                    }
-                } else {
-                    allFiles.add(Pair(rootFile, rootFile.name))
-                }
+            if (file.isDirectory) {
+                file.listFiles()?.forEach { deleteRecursive(it) }
             }
+            file.delete()
+        } catch (e: Exception) {
+            false
+        }
+    }
 
-            val total = allFiles.size
-            var done = 0
+    suspend fun copyFileOrDirectory(source: File, destinationDir: File): Boolean = withContext(Dispatchers.IO) {
+        try {
+            if (!destinationDir.exists()) destinationDir.mkdirs()
+            val target = File(destinationDir, source.name)
+            if (source.isDirectory) {
+                target.mkdirs()
+                source.listFiles()?.forEach { child ->
+                    copyFileOrDirectory(child, target)
+                }
+            } else {
+                source.copyTo(target, overwrite = true)
+            }
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
 
-            ZipOutputStream(BufferedOutputStream(FileOutputStream(destZipFile))).use { zos ->
-                val buffer = ByteArray(BUFFER_SIZE)
-                for ((f, entryName) in allFiles) {
-                    done++
-                    val p = if (total > 0) ((done * 100) / total) else 100
-                    onProgress?.invoke(f.name, p)
+    suspend fun moveFileOrDirectory(source: File, destinationDir: File): Boolean = withContext(Dispatchers.IO) {
+        try {
+            if (copyFileOrDirectory(source, destinationDir)) {
+                deleteRecursive(source)
+                true
+            } else false
+        } catch (e: Exception) {
+            false
+        }
+    }
 
-                    if (f.isDirectory) {
-                        val entry = ZipEntry(if (entryName.endsWith("/")) entryName else "$entryName/")
-                        zos.putNextEntry(entry)
-                        zos.closeEntry()
-                    } else {
-                        val entry = ZipEntry(entryName)
-                        entry.time = f.lastModified()
-                        entry.size = f.length()
-                        zos.putNextEntry(entry)
-                        BufferedInputStream(FileInputStream(f), BUFFER_SIZE).use { bis ->
-                            var read: Int
-                            while (bis.read(buffer).also { read = it } != -1) {
-                                zos.write(buffer, 0, read)
-                            }
-                        }
-                        zos.closeEntry()
-                    }
+    suspend fun createZipArchive(filesToZip: List<File>, zipFile: File): Boolean = withContext(Dispatchers.IO) {
+        try {
+            zipFile.parentFile?.mkdirs()
+            ZipOutputStream(FileOutputStream(zipFile)).use { zos ->
+                filesToZip.forEach { file ->
+                    addFileToZip(file, file.name, zos)
                 }
             }
             true
@@ -280,31 +176,47 @@ object FileUtils {
         }
     }
 
-    suspend fun extractZipArchive(
-        zipFile: File,
-        destDir: File,
-        onProgress: ((currentEntry: String) -> Unit)? = null
-    ): Boolean = withContext(Dispatchers.IO) {
+    private fun addFileToZip(file: File, entryPath: String, zos: ZipOutputStream) {
+        if (file.isDirectory) {
+            val dirPath = if (entryPath.endsWith("/")) entryPath else "$entryPath/"
+            zos.putNextEntry(ZipEntry(dirPath))
+            zos.closeEntry()
+            file.listFiles()?.forEach { child ->
+                addFileToZip(child, "$dirPath${child.name}", zos)
+            }
+        } else {
+            FileInputStream(file).use { fis ->
+                zos.putNextEntry(ZipEntry(entryPath))
+                val buffer = ByteArray(8192)
+                var len: Int
+                while (fis.read(buffer).also { len = it } > 0) {
+                    zos.write(buffer, 0, len)
+                }
+                zos.closeEntry()
+            }
+        }
+    }
+
+    suspend fun extractZipArchive(zipFile: File, targetDir: File): Boolean = withContext(Dispatchers.IO) {
         try {
-            if (!destDir.exists()) destDir.mkdirs()
-            ZipInputStream(BufferedInputStream(FileInputStream(zipFile))).use { zis ->
-                var entry: ZipEntry? = zis.nextEntry
-                val buffer = ByteArray(BUFFER_SIZE)
+            if (!targetDir.exists()) targetDir.mkdirs()
+            ZipInputStream(FileInputStream(zipFile)).use { zis ->
+                var entry = zis.nextEntry
+                val buffer = ByteArray(8192)
                 while (entry != null) {
-                    val newFile = File(destDir, entry.name)
-                    // Zip Slip vulnerability prevention
-                    if (!newFile.canonicalPath.startsWith(destDir.canonicalPath)) {
-                        throw SecurityException("Zip Slip detected: ${entry.name}")
+                    val newFile = File(targetDir, entry.name)
+                    // Security check to avoid zip-slip
+                    if (!newFile.canonicalPath.startsWith(targetDir.canonicalPath)) {
+                        throw IOException("Zip entry is outside target dir: ${entry.name}")
                     }
-                    onProgress?.invoke(entry.name)
                     if (entry.isDirectory) {
                         newFile.mkdirs()
                     } else {
                         newFile.parentFile?.mkdirs()
-                        BufferedOutputStream(FileOutputStream(newFile), BUFFER_SIZE).use { bos ->
-                            var read: Int
-                            while (zis.read(buffer).also { read = it } != -1) {
-                                bos.write(buffer, 0, read)
+                        FileOutputStream(newFile).use { fos ->
+                            var len: Int
+                            while (zis.read(buffer).also { len = it } > 0) {
+                                fos.write(buffer, 0, len)
                             }
                         }
                     }
@@ -319,63 +231,91 @@ object FileUtils {
         }
     }
 
+    fun shareFile(context: Context, file: File) {
+        try {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = getMimeType(file)
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val chooser = Intent.createChooser(intent, "Bagikan file via").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     fun shareMultipleFiles(context: Context, files: List<File>) {
         if (files.isEmpty()) return
         try {
-            val authority = "${context.packageName}.provider"
-            val uris = ArrayList<Uri>()
-            for (f in files) {
-                if (f.exists()) {
-                    uris.add(FileProvider.getUriForFile(context, authority, f))
-                }
-            }
-            if (uris.isEmpty()) return
-
+            val uris = ArrayList(files.map { FileProvider.getUriForFile(context, "${context.packageName}.provider", it) })
             val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
                 type = "*/*"
                 putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            val chooser = Intent.createChooser(intent, "Bagikan ${files.size} berkas")
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val chooser = Intent.createChooser(intent, "Bagikan ${files.size} file via").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
             context.startActivity(chooser)
         } catch (e: Exception) {
-            Toast.makeText(context, "Gagal membagikan berkas: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+            e.printStackTrace()
         }
     }
 
-    fun getAvailableStorages(context: Context): List<StorageVolumeInfo> {
-        val list = mutableListOf<StorageVolumeInfo>()
-        val dirs = context.getExternalFilesDirs(null)
-        dirs.forEachIndexed { index, dir ->
-            if (dir != null) {
-                val isPrimary = index == 0
-                val isRemovable = !isPrimary || android.os.Environment.isExternalStorageRemovable()
-                val name = if (isPrimary) "Penyimpanan Internal" else "Kartu SD (Penyimpanan $index)"
-                list.add(
-                    StorageVolumeInfo(
-                        name = name,
-                        path = dir,
-                        isRemovable = isRemovable,
-                        totalBytes = dir.totalSpace,
-                        freeBytes = dir.freeSpace
+    suspend fun listZipEntries(zipFile: File): List<ZipEntryItem> = withContext(Dispatchers.IO) {
+        val items = mutableListOf<ZipEntryItem>()
+        try {
+            val zf = java.util.zip.ZipFile(zipFile)
+            val entries = zf.entries()
+            while (entries.hasMoreElements()) {
+                val entry = entries.nextElement()
+                items.add(
+                    ZipEntryItem(
+                        name = entry.name,
+                        size = entry.size.coerceAtLeast(0L),
+                        isDirectory = entry.isDirectory,
+                        compressedSize = entry.compressedSize.coerceAtLeast(0L)
                     )
                 )
             }
+            zf.close()
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        if (list.isEmpty()) {
-            val internal = context.filesDir
-            list.add(
-                StorageVolumeInfo(
-                    name = "Penyimpanan Internal",
-                    path = internal,
-                    isRemovable = false,
-                    totalBytes = internal.totalSpace,
-                    freeBytes = internal.freeSpace
-                )
-            )
+        items
+    }
+
+    suspend fun searchFilesRecursively(
+        root: File,
+        query: String,
+        extensionFilter: String? = null,
+        maxResults: Int = 300,
+        showHidden: Boolean = false
+    ): List<File> = withContext(Dispatchers.IO) {
+        val results = mutableListOf<File>()
+        val q = query.lowercase().trim()
+        val ext = extensionFilter?.lowercase()?.removePrefix(".")
+
+        root.walkTopDown().onEnter { dir ->
+            if (!showHidden && (dir.isHidden || dir.name.startsWith("."))) false
+            else true
+        }.forEach { file ->
+            if (results.size >= maxResults) return@forEach
+            if (!showHidden && (file.isHidden || file.name.startsWith("."))) return@forEach
+
+            val nameMatch = q.isEmpty() || file.name.lowercase().contains(q)
+            val extMatch = ext == null || ext.isEmpty() || file.extension.equals(ext, ignoreCase = true)
+
+            if (nameMatch && extMatch && file.absolutePath != root.absolutePath) {
+                results.add(file)
+            }
         }
-        return list
+        results
     }
 }
