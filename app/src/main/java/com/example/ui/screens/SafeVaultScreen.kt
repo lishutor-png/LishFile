@@ -65,11 +65,21 @@ fun SafeVaultScreen(
 ) {
     val isVaultUnlocked by viewModel.isVaultUnlocked.collectAsState()
     val hasMasterPin by viewModel.preferences.hasMasterPin.collectAsState()
+    val isBiometricEnabled by viewModel.preferences.isBiometricEnabled.collectAsState()
     val vaultFiles by viewModel.vaultFiles.collectAsState()
 
     var inputPin by remember { mutableStateOf("") }
     var pinError by remember { mutableStateOf<String?>(null) }
     var restoreTargetFile by remember { mutableStateOf<File?>(null) }
+    var hasAutoPrompted by remember { mutableStateOf(false) }
+
+    // Auto prompt biometric when entering vault screen if locked
+    androidx.compose.runtime.LaunchedEffect(isVaultUnlocked) {
+        if (!isVaultUnlocked && !hasAutoPrompted && isBiometricEnabled) {
+            hasAutoPrompted = true
+            onTriggerBiometrics()
+        }
+    }
 
     Column(
         modifier = modifier
@@ -105,38 +115,69 @@ fun SafeVaultScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Box(
+                // Prominent Fingerprint Button Card
+                Card(
+                    onClick = onTriggerBiometrics,
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                    ),
                     modifier = Modifier
-                        .size(80.dp)
-                        .clip(CircleShape)
-                        .background(ColorVault.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth(0.88f)
+                        .testTag("vault_biometric_card")
                 ) {
-                    Icon(
-                        Icons.Default.Security,
-                        contentDescription = "Brankas",
-                        tint = ColorVault,
-                        modifier = Modifier.size(44.dp)
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 20.dp, horizontal = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Fingerprint,
+                                contentDescription = "Sensor Sidik Jari",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(44.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Masuk dengan Sidik Jari",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Sentuh untuk memindai sidik jari Anda",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = if (hasMasterPin) "Buka Brankas Aman" else "Atur PIN Brankas Aman",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = "File dienkripsi menggunakan standar militer AES-256",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
                 Spacer(modifier = Modifier.height(24.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    androidx.compose.material3.HorizontalDivider(modifier = Modifier.weight(1f))
+                    Text(
+                        text = "  atau gunakan PIN  ",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    androidx.compose.material3.HorizontalDivider(modifier = Modifier.weight(1f))
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
 
                 OutlinedTextField(
                     value = inputPin,
@@ -146,12 +187,12 @@ fun SafeVaultScreen(
                             pinError = null
                         }
                     },
-                    label = { Text("Masukkan 4–6 Digit PIN") },
+                    label = { Text(if (hasMasterPin) "Masukkan 4–6 Digit PIN" else "Atur 4–6 Digit PIN Baru") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     isError = pinError != null,
                     modifier = Modifier
-                        .fillMaxWidth(0.8f)
+                        .fillMaxWidth(0.85f)
                         .testTag("vault_screen_pin_input")
                 )
 
@@ -166,40 +207,27 @@ fun SafeVaultScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Button(
-                        onClick = {
-                            if (inputPin.length < 4) {
-                                pinError = "PIN minimal 4 digit"
+                Button(
+                    onClick = {
+                        if (inputPin.length < 4) {
+                            pinError = "PIN minimal 4 digit"
+                        } else {
+                            if (hasMasterPin) {
+                                val ok = viewModel.unlockVaultWithPin(inputPin)
+                                if (!ok) pinError = "PIN salah!"
                             } else {
-                                if (hasMasterPin) {
-                                    val ok = viewModel.unlockVaultWithPin(inputPin)
-                                    if (!ok) pinError = "PIN salah!"
-                                } else {
-                                    viewModel.setupVaultPin(inputPin)
-                                }
+                                viewModel.setupVaultPin(inputPin)
                             }
-                        },
-                        modifier = Modifier.testTag("vault_unlock_button")
-                    ) {
-                        Icon(Icons.Default.LockOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (hasMasterPin) "Buka Brankas" else "Simpan PIN")
-                    }
-
-                    if (hasMasterPin) {
-                        OutlinedButton(
-                            onClick = onTriggerBiometrics,
-                            modifier = Modifier.testTag("vault_biometric_button")
-                        ) {
-                            Icon(Icons.Default.Fingerprint, contentDescription = null, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Biometrik")
                         }
-                    }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth(0.85f)
+                        .height(48.dp)
+                        .testTag("vault_unlock_button")
+                ) {
+                    Icon(Icons.Default.LockOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(if (hasMasterPin) "Buka dengan PIN" else "Simpan PIN & Buka")
                 }
             }
         } else {

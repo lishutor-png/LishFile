@@ -25,11 +25,49 @@ class AppPreferences(context: Context) {
     private val _hasMasterPin = MutableStateFlow(prefs.getString(KEY_MASTER_PIN, null) != null)
     val hasMasterPin: StateFlow<Boolean> = _hasMasterPin.asStateFlow()
 
-    private val _isBiometricEnabled = MutableStateFlow(prefs.getBoolean(KEY_BIOMETRIC, false))
+    private val _isBiometricEnabled = MutableStateFlow(prefs.getBoolean(KEY_BIOMETRIC, true))
     val isBiometricEnabled: StateFlow<Boolean> = _isBiometricEnabled.asStateFlow()
 
     private val _recentFolders = MutableStateFlow(loadRecentFolders())
     val recentFolders: StateFlow<List<String>> = _recentFolders.asStateFlow()
+
+    fun saveCategoryStats(stats: com.example.model.CategoryOverviewStats) {
+        prefs.edit()
+            .putInt("cat_img_count", stats.imagesCount)
+            .putLong("cat_img_size", stats.imagesSize)
+            .putInt("cat_vid_count", stats.videosCount)
+            .putLong("cat_vid_size", stats.videosSize)
+            .putInt("cat_aud_count", stats.audioCount)
+            .putLong("cat_aud_size", stats.audioSize)
+            .putInt("cat_doc_count", stats.docsCount)
+            .putLong("cat_doc_size", stats.docsSize)
+            .putInt("cat_arc_count", stats.archivesCount)
+            .putLong("cat_arc_size", stats.archivesSize)
+            .putInt("cat_apk_count", stats.apksCount)
+            .putLong("cat_apk_size", stats.apksSize)
+            .putInt("cat_dl_count", stats.downloadsCount)
+            .putLong("cat_dl_size", stats.downloadsSize)
+            .apply()
+    }
+
+    fun loadCategoryStats(): com.example.model.CategoryOverviewStats {
+        return com.example.model.CategoryOverviewStats(
+            imagesCount = prefs.getInt("cat_img_count", 0),
+            imagesSize = prefs.getLong("cat_img_size", 0L),
+            videosCount = prefs.getInt("cat_vid_count", 0),
+            videosSize = prefs.getLong("cat_vid_size", 0L),
+            audioCount = prefs.getInt("cat_aud_count", 0),
+            audioSize = prefs.getLong("cat_aud_size", 0L),
+            docsCount = prefs.getInt("cat_doc_count", 0),
+            docsSize = prefs.getLong("cat_doc_size", 0L),
+            archivesCount = prefs.getInt("cat_arc_count", 0),
+            archivesSize = prefs.getLong("cat_arc_size", 0L),
+            apksCount = prefs.getInt("cat_apk_count", 0),
+            apksSize = prefs.getLong("cat_apk_size", 0L),
+            downloadsCount = prefs.getInt("cat_dl_count", 0),
+            downloadsSize = prefs.getLong("cat_dl_size", 0L)
+        )
+    }
 
     fun addRecentFolder(path: String) {
         val current = _recentFolders.value.toMutableList()

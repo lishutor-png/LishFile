@@ -45,6 +45,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -115,6 +116,7 @@ fun FileListItem(
     onShare: () -> Unit = {},
     onMove: () -> Unit = {},
     onPreviewZip: () -> Unit = {},
+    onOpenFileLocation: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -183,7 +185,10 @@ fun FileListItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     val metaText = if (item.isDirectory) {
                         FileUtils.formatDate(item.lastModified)
                     } else {
@@ -194,6 +199,21 @@ fun FileListItem(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    val parentName = item.file.parentFile?.name
+                    if (!item.isDirectory && !parentName.isNullOrEmpty() && parentName != "0" && parentName != "emulated") {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        ) {
+                            Text(
+                                text = "📁 $parentName",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
                 }
             }
 
@@ -225,7 +245,8 @@ fun FileListItem(
                         onEditImage = onEditImage,
                         onShare = onShare,
                         onMove = onMove,
-                        onPreviewZip = onPreviewZip
+                        onPreviewZip = onPreviewZip,
+                        onOpenFileLocation = onOpenFileLocation
                     )
                 }
             }
@@ -254,6 +275,7 @@ fun FileGridItem(
     onShare: () -> Unit = {},
     onMove: () -> Unit = {},
     onPreviewZip: () -> Unit = {},
+    onOpenFileLocation: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -325,7 +347,8 @@ fun FileGridItem(
                         onEditImage = onEditImage,
                         onShare = onShare,
                         onMove = onMove,
-                        onPreviewZip = onPreviewZip
+                        onPreviewZip = onPreviewZip,
+                        onOpenFileLocation = onOpenFileLocation
                     )
                 }
             }
@@ -382,12 +405,20 @@ fun FileActionDropdown(
     onEditImage: () -> Unit,
     onShare: () -> Unit = {},
     onMove: () -> Unit = {},
-    onPreviewZip: () -> Unit = {}
+    onPreviewZip: () -> Unit = {},
+    onOpenFileLocation: (() -> Unit)? = null
 ) {
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismiss
     ) {
+        if (onOpenFileLocation != null) {
+            DropdownMenuItem(
+                text = { Text("Buka Lokasi Folder") },
+                leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null) },
+                onClick = { onDismiss(); onOpenFileLocation() }
+            )
+        }
         if (item.fileType == FileType.IMAGE) {
             DropdownMenuItem(
                 text = { Text("Edit Gambar") },

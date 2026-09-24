@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -129,6 +130,7 @@ fun FileManagerScreen(
     val duplicateResult by viewModel.duplicateResult.collectAsState()
     val recentFolders by viewModel.recentFolders.collectAsState()
     val isDeepSearching by viewModel.isDeepSearching.collectAsState()
+    val isScanningCategories by viewModel.isScanningCategories.collectAsState()
     val searchEntireStorage by viewModel.searchEntireStorage.collectAsState()
     val extensionFilter by viewModel.extensionFilter.collectAsState()
     val coroutineScope = rememberCoroutineScope()
@@ -158,11 +160,14 @@ fun FileManagerScreen(
     var isBrowsingFolder by rememberSaveable { mutableStateOf(false) }
     val searchQuery by viewModel.searchQuery.collectAsState()
     val isSearching = searchQuery.isNotEmpty() || extensionFilter != null || searchEntireStorage
-    val shouldShowExplorer = isBrowsingFolder || isSearching
+    val shouldShowExplorer = isBrowsingFolder || isSearching || selectedCategory != ViewCategory.ALL
     val hasStoragePermission = StoragePermissionHelper.hasStoragePermission(context)
 
-    BackHandler(enabled = isBrowsingFolder && !isSearching) {
-        if (canNavigateBack) {
+    BackHandler(enabled = (isBrowsingFolder || selectedCategory != ViewCategory.ALL) && !isSearching) {
+        if (selectedCategory != ViewCategory.ALL) {
+            viewModel.setCategory(ViewCategory.ALL)
+            isBrowsingFolder = false
+        } else if (canNavigateBack) {
             viewModel.navigateBack()
         } else {
             isBrowsingFolder = false
@@ -204,34 +209,102 @@ fun FileManagerScreen(
             )
         } else {
             Column(modifier = Modifier.fillMaxSize()) {
-                // 1. Unified Breadcrumb & Navigation Header
-                BreadcrumbHeader(
-                    currentDir = currentDir,
-                    isAtRoot = isAtRoot,
-                    canNavigateBack = canNavigateBack,
-                    canNavigateForward = canNavigateForward,
-                    onNavigateBack = { viewModel.navigateBack() },
-                    onNavigateForward = { viewModel.navigateForward() },
-                    onNavigateUp = {
-                        if (isAtRoot) {
+                if (selectedCategory != ViewCategory.ALL) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surface,
+                        shadowElevation = 1.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    viewModel.setCategory(ViewCategory.ALL)
+                                    isBrowsingFolder = false
+                                    viewModel.setSearchQuery("")
+                                    viewModel.setExtensionFilter(null)
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Kembali ke Beranda"
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                val title = when (selectedCategory) {
+                                    ViewCategory.IMAGES -> "Semua Gambar"
+                                    ViewCategory.AUDIO -> "Semua Musik & Audio"
+                                    ViewCategory.VIDEOS -> "Semua Video"
+                                    ViewCategory.DOCUMENTS -> "Semua Dokumen"
+                                    ViewCategory.ARCHIVES -> "Semua Arsip Zip/Rar"
+                                    ViewCategory.APKS -> "Semua File APK"
+                                    ViewCategory.DOWNLOADS -> "Semua Unduhan"
+                                    else -> "Semua File"
+                                }
+                                Text(
+                                    text = title,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (isScanningCategories) "Memindai file perangkat..." else "${files.size} file di seluruh penyimpanan",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (isScanningCategories) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
+                            IconButton(onClick = { viewModel.refreshCategoryStats() }) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Muat Ulang Kategori",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // 1. Unified Breadcrumb & Navigation Header
+                    BreadcrumbHeader(
+                        currentDir = currentDir,
+                        isAtRoot = isAtRoot,
+                        canNavigateBack = canNavigateBack,
+                        canNavigateForward = canNavigateForward,
+                        onNavigateBack = { viewModel.navigateBack() },
+                        onNavigateForward = { viewModel.navigateForward() },
+                        onNavigateUp = {
+                            if (isAtRoot) {
+                                isBrowsingFolder = false
+                                viewModel.setCategory(ViewCategory.ALL)
+                            } else {
+                                viewModel.navigateUp()
+                            }
+                        },
+                        onBackToCategories = {
                             isBrowsingFolder = false
                             viewModel.setCategory(ViewCategory.ALL)
-                        } else {
-                            viewModel.navigateUp()
-                        }
-                    },
-                    onBackToCategories = {
-                        isBrowsingFolder = false
-                        viewModel.setCategory(ViewCategory.ALL)
-                        viewModel.setSearchQuery("")
-                        viewModel.setExtensionFilter(null)
-                    },
-                    onNavigateToPath = { viewModel.navigateTo(it) },
-                    onShowRecentFolders = { showRecentFoldersDialog = true }
-                )
+                            viewModel.setSearchQuery("")
+                            viewModel.setExtensionFilter(null)
+                        },
+                        onNavigateToPath = { viewModel.navigateTo(it) },
+                        onShowRecentFolders = { showRecentFoldersDialog = true }
+                    )
+                }
 
-                // 2. Storage Overview bar (only if multi-storage available)
-                if (availableStorages.size > 1) {
+                // 2. Storage Overview bar (only if multi-storage available and not in category view)
+                if (availableStorages.size > 1 && selectedCategory == ViewCategory.ALL) {
                     StorageHeader(
                         storages = availableStorages,
                         selectedStorageIndex = selectedStorageIndex,
@@ -404,7 +477,14 @@ fun FileManagerScreen(
                                 onEditImage = { editingImageFile = item.file },
                                 onShare = { FileUtils.shareFile(context, item.file) },
                                 onMove = { movingTargetFile = item.file },
-                                onPreviewZip = { previewingZipFile = item.file }
+                                onPreviewZip = { previewingZipFile = item.file },
+                                onOpenFileLocation = {
+                                    item.file.parentFile?.let { p ->
+                                        viewModel.setCategory(ViewCategory.ALL)
+                                        viewModel.navigateTo(p)
+                                        isBrowsingFolder = true
+                                    }
+                                }
                             )
                         }
                     }
@@ -457,7 +537,14 @@ fun FileManagerScreen(
                                 onEditImage = { editingImageFile = item.file },
                                 onShare = { FileUtils.shareFile(context, item.file) },
                                 onMove = { movingTargetFile = item.file },
-                                onPreviewZip = { previewingZipFile = item.file }
+                                onPreviewZip = { previewingZipFile = item.file },
+                                onOpenFileLocation = {
+                                    item.file.parentFile?.let { p ->
+                                        viewModel.setCategory(ViewCategory.ALL)
+                                        viewModel.navigateTo(p)
+                                        isBrowsingFolder = true
+                                    }
+                                }
                             )
                         }
                     }

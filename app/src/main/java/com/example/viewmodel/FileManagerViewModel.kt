@@ -110,8 +110,14 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
     private val _storageStats = MutableStateFlow(StorageStats())
     val storageStats: StateFlow<StorageStats> = _storageStats.asStateFlow()
 
-    private val _categoryOverviewStats = MutableStateFlow(CategoryOverviewStats())
+    private val _categoryOverviewStats = MutableStateFlow(preferences.loadCategoryStats())
     val categoryOverviewStats: StateFlow<CategoryOverviewStats> = _categoryOverviewStats.asStateFlow()
+
+    private val _isScanningCategories = MutableStateFlow(false)
+    val isScanningCategories: StateFlow<Boolean> = _isScanningCategories.asStateFlow()
+
+    private val _categoryFilesMap = MutableStateFlow<Map<ViewCategory, List<FileItem>>>(emptyMap())
+    val categoryFilesMap: StateFlow<Map<ViewCategory, List<FileItem>>> = _categoryFilesMap.asStateFlow()
 
     // Duplicates
     private val _duplicateResult = MutableStateFlow(DuplicateScanResult())
@@ -428,54 +434,15 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun openCategoryDirectory(category: ViewCategory, largestFirst: Boolean = false) {
-        val root = _availableStorages.value.firstOrNull()?.rootDir ?: Environment.getExternalStorageDirectory()
         _selectedCategory.value = category
+        _searchQuery.value = ""
+        _extensionFilter.value = null
         if (largestFirst) {
             setSorting(SortBy.SIZE, SortOrder.DESCENDING)
         }
-        when (category) {
-            ViewCategory.DOWNLOADS -> {
-                val dl = File(root, "Download")
-                if (dl.exists() && dl.isDirectory) navigateTo(dl)
-                else navigateTo(root)
-            }
-            ViewCategory.IMAGES -> {
-                val dcim = File(root, "DCIM")
-                val pictures = File(root, "Pictures")
-                if (dcim.exists() && dcim.isDirectory) navigateTo(dcim)
-                else if (pictures.exists() && pictures.isDirectory) navigateTo(pictures)
-                else navigateTo(root)
-            }
-            ViewCategory.VIDEOS -> {
-                val movies = File(root, "Movies")
-                val dcim = File(root, "DCIM")
-                if (movies.exists() && movies.isDirectory) navigateTo(movies)
-                else if (dcim.exists() && dcim.isDirectory) navigateTo(dcim)
-                else navigateTo(root)
-            }
-            ViewCategory.AUDIO -> {
-                val music = File(root, "Music")
-                if (music.exists() && music.isDirectory) navigateTo(music)
-                else navigateTo(root)
-            }
-            ViewCategory.DOCUMENTS -> {
-                val docs = File(root, "Documents")
-                if (docs.exists() && docs.isDirectory) navigateTo(docs)
-                else navigateTo(root)
-            }
-            ViewCategory.ARCHIVES -> {
-                _searchEntireStorage.value = true
-                _extensionFilter.value = "zip"
-                triggerDeepSearch()
-            }
-            ViewCategory.APKS -> {
-                _searchEntireStorage.value = true
-                _extensionFilter.value = "apk"
-                triggerDeepSearch()
-            }
-            else -> {
-                navigateTo(root)
-            }
+        // If category files are not loaded or empty, refresh in background
+        if (_categoryFilesMap.value[category].isNullOrEmpty()) {
+            refreshCategoryStats()
         }
     }
 
@@ -485,7 +452,10 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
         val sizeF = _sizeFilter.value
         val extFilter = _extensionFilter.value?.lowercase()?.removePrefix(".")
 
-        var list = if (_searchEntireStorage.value && (query.isNotEmpty() || extFilter != null)) {
+        var list = if (cat != ViewCategory.ALL) {
+            // Load ALL files of that category across the entire device
+            _categoryFilesMap.value[cat] ?: emptyList()
+        } else if (_searchEntireStorage.value && (query.isNotEmpty() || extFilter != null)) {
             _deepSearchResults.value
         } else {
             _allFilesInCurrentDir.value
@@ -497,21 +467,6 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
 
         if (!extFilter.isNullOrEmpty()) {
             list = list.filter { it.extension.equals(extFilter, ignoreCase = true) }
-        }
-
-        if (cat != ViewCategory.ALL) {
-            list = list.filter {
-                when (cat) {
-                    ViewCategory.IMAGES -> it.fileType == FileType.IMAGE
-                    ViewCategory.AUDIO -> it.fileType == FileType.AUDIO
-                    ViewCategory.VIDEOS -> it.fileType == FileType.VIDEO
-                    ViewCategory.DOCUMENTS -> it.fileType == FileType.DOCUMENT
-                    ViewCategory.ARCHIVES -> it.fileType == FileType.ARCHIVE
-                    ViewCategory.APKS -> it.fileType == FileType.APK
-                    ViewCategory.DOWNLOADS -> it.file.parent?.contains("Download", ignoreCase = true) == true
-                    else -> true
-                }
-            }
         }
 
         if (sizeF != SizeFilter.ANY) {
@@ -565,42 +520,17 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
 
     fun refreshCategoryStats() {
         viewModelScope.launch(Dispatchers.IO) {
-            val root = _availableStorages.value.getOrNull(_selectedStorageIndex.value)?.rootDir ?: _currentDir.value
-            var imgCount = 0; var imgSize = 0L
-            var audCount = 0; var audSize = 0L
-            var vidCount = 0; var vidSize = 0L
-            var docCount = 0; var docSize = 0L
-            var arcCount = 0; var arcSize = 0L
-            var apkCount = 0; var apkSize = 0L
-            var dlCount = 0; var dlSize = 0L
-
-            root.walkTopDown().maxDepth(3).forEach { file ->
-                if (file.isFile) {
-                    val size = file.length()
-                    when (FileUtils.getFileType(file)) {
-                        FileType.IMAGE -> { imgCount++; imgSize += size }
-                        FileType.AUDIO -> { audCount++; audSize += size }
-                        FileType.VIDEO -> { vidCount++; vidSize += size }
-                        FileType.DOCUMENT -> { docCount++; docSize += size }
-                        FileType.ARCHIVE -> { arcCount++; arcSize += size }
-                        FileType.APK -> { apkCount++; apkSize += size }
-                        else -> {}
-                    }
-                    if (file.parent?.contains("Download", ignoreCase = true) == true) {
-                        dlCount++; dlSize += size
-                    }
-                }
+            _isScanningCategories.value = true
+            try {
+                val (stats, filesMap) = com.example.util.MediaScannerHelper.scanCategoryStatsFast(context)
+                _categoryOverviewStats.value = stats
+                _categoryFilesMap.value = filesMap
+                preferences.saveCategoryStats(stats)
+            } catch (e: Throwable) {
+                e.printStackTrace()
+            } finally {
+                _isScanningCategories.value = false
             }
-
-            _categoryOverviewStats.value = CategoryOverviewStats(
-                imagesCount = imgCount, imagesSize = imgSize,
-                audioCount = audCount, audioSize = audSize,
-                videosCount = vidCount, videosSize = vidSize,
-                docsCount = docCount, docsSize = docSize,
-                archivesCount = arcCount, archivesSize = arcSize,
-                apksCount = apkCount, apksSize = apkSize,
-                downloadsCount = dlCount, downloadsSize = dlSize
-            )
         }
     }
 

@@ -36,16 +36,52 @@ class MainActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
-        viewModel.refreshAll()
+        // Fast refresh without hanging disk crawls
+        viewModel.refreshCurrentDir()
+        viewModel.refreshStorageStats()
     }
 
     private fun showBiometricPrompt() {
+        val biometricManager = BiometricManager.from(this)
+        val canAuthenticate = biometricManager.canAuthenticate(
+            BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK
+        )
+
+        when (canAuthenticate) {
+            BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> {
+                viewModel.notifySnackbar("Perangkat ini tidak memiliki sensor sidik jari. Silakan gunakan PIN.")
+                return
+            }
+            BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> {
+                viewModel.notifySnackbar("Sensor biometrik sedang sibuk / tidak tersedia. Silakan gunakan PIN.")
+                return
+            }
+            BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> {
+                viewModel.notifySnackbar("Belum ada sidik jari yang terdaftar di HP. Silakan daftarkan di Pengaturan Keamanan HP atau gunakan PIN.")
+                try {
+                    val enrollIntent = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        android.content.Intent(android.provider.Settings.ACTION_BIOMETRIC_ENROLL).apply {
+                            putExtra(
+                                android.provider.Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED,
+                                BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK
+                            )
+                        }
+                    } else {
+                        android.content.Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS)
+                    }
+                    startActivity(enrollIntent)
+                } catch (_: Exception) {}
+                return
+            }
+            else -> {}
+        }
+
         val executor = ContextCompat.getMainExecutor(this)
         val prompt = BiometricPrompt(this, executor, object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                 super.onAuthenticationSucceeded(result)
                 viewModel.unlockVaultWithBiometrics()
-                viewModel.notifySnackbar("Brankas berhasil dibuka dengan Biometrik")
+                viewModel.notifySnackbar("Brankas berhasil dibuka dengan Sidik Jari!")
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
@@ -58,7 +94,7 @@ class MainActivity : FragmentActivity() {
 
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Buka Brankas Aman")
-            .setSubtitle("Gunakan sensor sidik jari atau wajah Anda")
+            .setSubtitle("Pindai sidik jari Anda untuk mengakses file terenkripsi")
             .setNegativeButtonText("Gunakan PIN")
             .build()
 
