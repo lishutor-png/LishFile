@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
@@ -74,6 +75,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import com.example.model.CategoryFolderBucket
 import com.example.model.FileItem
 import com.example.model.FileType
 import com.example.model.SizeFilter
@@ -82,6 +84,7 @@ import com.example.model.SortOrder
 import com.example.model.ViewCategory
 import com.example.ui.components.AudioPlayerDialog
 import com.example.ui.components.CategoryDashboard
+import com.example.ui.components.CategoryFolderCard
 import com.example.ui.components.CompressZipDialog
 import com.example.ui.components.ConciseCategoryHomeView
 import com.example.ui.components.CreateFolderDialog
@@ -158,20 +161,65 @@ fun FileManagerScreen(
     var showFabMenu by remember { mutableStateOf(false) }
 
     var isBrowsingFolder by rememberSaveable { mutableStateOf(false) }
+    var selectedCategoryFolderPath by rememberSaveable { mutableStateOf<String?>(null) }
+    var categoryViewMode by rememberSaveable { mutableStateOf(0) } // 0: Menurut Folder, 1: Semua File
+
+    val folderBuckets = remember(files) {
+        val map = linkedMapOf<File, MutableList<FileItem>>()
+        for (item in files) {
+            val parent = item.file.parentFile ?: continue
+            map.getOrPut(parent) { mutableListOf() }.add(item)
+        }
+        map.map { (folder, folderFiles) ->
+            val folderName = folder.name
+            val parentParent = folder.parentFile?.name
+            val displayPath = if (!parentParent.isNullOrEmpty() && parentParent != "0" && parentParent != "emulated") {
+                "$parentParent / $folderName"
+            } else {
+                folderName
+            }
+            CategoryFolderBucket(
+                folder = folder,
+                folderName = folderName,
+                displayPath = displayPath,
+                files = folderFiles,
+                fileCount = folderFiles.size,
+                totalSize = folderFiles.sumOf { it.size },
+                previewFile = folderFiles.firstOrNull()
+            )
+        }.sortedByDescending { it.fileCount }
+    }
+
+    val activeFolderBucket = remember(folderBuckets, selectedCategoryFolderPath) {
+        folderBuckets.find { it.folder.absolutePath == selectedCategoryFolderPath }
+    }
+
+    val displayedFiles = remember(files, selectedCategory, selectedCategoryFolderPath) {
+        if (selectedCategory != ViewCategory.ALL && selectedCategoryFolderPath != null) {
+            files.filter { it.file.parentFile?.absolutePath == selectedCategoryFolderPath }
+        } else {
+            files
+        }
+    }
+
     val searchQuery by viewModel.searchQuery.collectAsState()
     val isSearching = searchQuery.isNotEmpty() || extensionFilter != null || searchEntireStorage
     val shouldShowExplorer = isBrowsingFolder || isSearching || selectedCategory != ViewCategory.ALL
     val hasStoragePermission = StoragePermissionHelper.hasStoragePermission(context)
 
     BackHandler(enabled = (isBrowsingFolder || selectedCategory != ViewCategory.ALL) && !isSearching) {
-        if (selectedCategory != ViewCategory.ALL) {
+        if (selectedCategory != ViewCategory.ALL && selectedCategoryFolderPath != null) {
+            selectedCategoryFolderPath = null
+        } else if (selectedCategory != ViewCategory.ALL) {
             viewModel.setCategory(ViewCategory.ALL)
+            selectedCategoryFolderPath = null
             isBrowsingFolder = false
         } else if (canNavigateBack) {
             viewModel.navigateBack()
         } else {
             isBrowsingFolder = false
             viewModel.setCategory(ViewCategory.ALL)
+            selectedCategoryFolderPath = null
         }
     }
 
@@ -191,6 +239,8 @@ fun FileManagerScreen(
                     isBrowsingFolder = true
                 },
                 onOpenCategory = { cat ->
+                    selectedCategoryFolderPath = null
+                    categoryViewMode = 0
                     viewModel.openCategoryDirectory(cat)
                     isBrowsingFolder = true
                 },
@@ -215,63 +265,109 @@ fun FileManagerScreen(
                         color = MaterialTheme.colorScheme.surface,
                         shadowElevation = 1.dp
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(
-                                onClick = {
-                                    viewModel.setCategory(ViewCategory.ALL)
-                                    isBrowsingFolder = false
-                                    viewModel.setSearchQuery("")
-                                    viewModel.setExtensionFilter(null)
-                                }
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Kembali ke Beranda"
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                val title = when (selectedCategory) {
-                                    ViewCategory.IMAGES -> "Semua Gambar"
-                                    ViewCategory.AUDIO -> "Semua Musik & Audio"
-                                    ViewCategory.VIDEOS -> "Semua Video"
-                                    ViewCategory.DOCUMENTS -> "Semua Dokumen"
-                                    ViewCategory.ARCHIVES -> "Semua Arsip Zip/Rar"
-                                    ViewCategory.APKS -> "Semua File APK"
-                                    ViewCategory.DOWNLOADS -> "Semua Unduhan"
-                                    else -> "Semua File"
+                                IconButton(
+                                    onClick = {
+                                        if (selectedCategoryFolderPath != null) {
+                                            selectedCategoryFolderPath = null
+                                        } else {
+                                            viewModel.setCategory(ViewCategory.ALL)
+                                            isBrowsingFolder = false
+                                            viewModel.setSearchQuery("")
+                                            viewModel.setExtensionFilter(null)
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = if (selectedCategoryFolderPath != null) "Kembali ke Daftar Folder" else "Kembali ke Beranda"
+                                    )
                                 }
-                                Text(
-                                    text = title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = if (isScanningCategories) "Memindai file perangkat..." else "${files.size} file di seluruh penyimpanan",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    if (selectedCategoryFolderPath != null && activeFolderBucket != null) {
+                                        Text(
+                                            text = "📁 ${activeFolderBucket.folderName}",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1
+                                        )
+                                        Text(
+                                            text = "${activeFolderBucket.displayPath} • ${displayedFiles.size} berkas",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1
+                                        )
+                                    } else {
+                                        val title = when (selectedCategory) {
+                                            ViewCategory.IMAGES -> "Semua Gambar"
+                                            ViewCategory.AUDIO -> "Semua Musik & Audio"
+                                            ViewCategory.VIDEOS -> "Semua Video"
+                                            ViewCategory.DOCUMENTS -> "Semua Dokumen"
+                                            ViewCategory.ARCHIVES -> "Semua Arsip Zip/Rar"
+                                            ViewCategory.APKS -> "Semua File APK"
+                                            ViewCategory.DOWNLOADS -> "Semua Unduhan"
+                                            else -> "Semua File"
+                                        }
+                                        Text(
+                                            text = title,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = if (isScanningCategories) "Memindai file perangkat..." else "${folderBuckets.size} folder • ${files.size} berkas",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                if (isScanningCategories) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
+                                IconButton(onClick = { viewModel.refreshCategoryStats() }) {
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = "Muat Ulang Kategori",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
-                            if (isScanningCategories) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                            }
-                            IconButton(onClick = { viewModel.refreshCategoryStats() }) {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = "Muat Ulang Kategori",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
+
+                            // View Mode toggle: Folder vs Flat
+                            if (selectedCategoryFolderPath == null) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    FilterChip(
+                                        selected = categoryViewMode == 0,
+                                        onClick = { categoryViewMode = 0 },
+                                        label = { Text("📁 Menurut Folder (${folderBuckets.size})", fontSize = 12.sp) },
+                                        leadingIcon = if (categoryViewMode == 0) {
+                                            { Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                        } else null
+                                    )
+                                    FilterChip(
+                                        selected = categoryViewMode == 1,
+                                        onClick = { categoryViewMode = 1 },
+                                        label = { Text("📄 Semua Berkas (${files.size})", fontSize = 12.sp) }
+                                    )
+                                }
                             }
                         }
                     }
@@ -358,8 +454,69 @@ fun FileManagerScreen(
                 )
             }
 
-            // 6. Files List / Grid View
-            if (files.isEmpty() && !isDeepSearching) {
+            // 6. Files List / Grid View or Category Folder Buckets
+            if (selectedCategory != ViewCategory.ALL && selectedCategoryFolderPath == null && categoryViewMode == 0) {
+                if (folderBuckets.isEmpty() && !isScanningCategories) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FolderOpen,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Tidak Ada Folder Ditemukan",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Belum ada berkas pada kategori ini di penyimpanan perangkat",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(horizontal = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
+                    ) {
+                        items(folderBuckets, key = { it.folder.absolutePath }) { bucket ->
+                            CategoryFolderCard(
+                                bucket = bucket,
+                                category = selectedCategory,
+                                onClick = {
+                                    selectedCategoryFolderPath = bucket.folder.absolutePath
+                                }
+                            )
+                        }
+                    }
+                }
+            } else if (displayedFiles.isEmpty() && !isDeepSearching) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -435,7 +592,7 @@ fun FileManagerScreen(
                             .padding(horizontal = 12.dp),
                         contentPadding = PaddingValues(bottom = 80.dp)
                     ) {
-                        items(files, key = { it.path }) { item ->
+                        items(displayedFiles, key = { it.path }) { item ->
                             FileGridItem(
                                 item = item,
                                 isSelected = selectedPaths.contains(item.path),
@@ -495,7 +652,7 @@ fun FileManagerScreen(
                             .weight(1f),
                         contentPadding = PaddingValues(bottom = 80.dp)
                     ) {
-                        items(files, key = { it.path }) { item ->
+                        items(displayedFiles, key = { it.path }) { item ->
                             FileListItem(
                                 item = item,
                                 isSelected = selectedPaths.contains(item.path),
@@ -697,27 +854,57 @@ fun FileManagerScreen(
         )
     }
 
+    val currentImageList = remember(displayedFiles, viewingImageFile) {
+        val imgs = displayedFiles.filter { it.fileType == FileType.IMAGE }.map { it.file }
+        if (viewingImageFile != null && !imgs.contains(viewingImageFile)) {
+            listOf(viewingImageFile!!) + imgs
+        } else {
+            imgs
+        }
+    }
+
+    val currentAudioList = remember(displayedFiles, playingAudioFile) {
+        val audios = displayedFiles.filter { it.fileType == FileType.AUDIO }.map { it.file }
+        if (playingAudioFile != null && !audios.contains(playingAudioFile)) {
+            listOf(playingAudioFile!!) + audios
+        } else {
+            audios
+        }
+    }
+
+    val currentVideoList = remember(displayedFiles, playingVideoFile) {
+        val vids = displayedFiles.filter { it.fileType == FileType.VIDEO }.map { it.file }
+        if (playingVideoFile != null && !vids.contains(playingVideoFile)) {
+            listOf(playingVideoFile!!) + vids
+        } else {
+            vids
+        }
+    }
+
     viewingImageFile?.let { imgFile ->
         ImageViewerDialog(
-            file = imgFile,
+            initialFile = imgFile,
+            imageList = if (currentImageList.contains(imgFile)) currentImageList else listOf(imgFile),
             onDismiss = { viewingImageFile = null },
-            onEditImage = {
+            onEditImage = { fileToEdit ->
                 viewingImageFile = null
-                editingImageFile = imgFile
+                editingImageFile = fileToEdit
             }
         )
     }
 
     playingAudioFile?.let { audioFile ->
         AudioPlayerDialog(
-            file = audioFile,
+            initialFile = audioFile,
+            audioList = if (currentAudioList.contains(audioFile)) currentAudioList else listOf(audioFile),
             onDismiss = { playingAudioFile = null }
         )
     }
 
     playingVideoFile?.let { videoFile ->
         VideoPlayerDialog(
-            file = videoFile,
+            initialFile = videoFile,
+            videoList = if (currentVideoList.contains(videoFile)) currentVideoList else listOf(videoFile),
             onDismiss = { playingVideoFile = null }
         )
     }

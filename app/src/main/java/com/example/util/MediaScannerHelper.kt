@@ -258,67 +258,65 @@ object MediaScannerHelper {
             File(root, "Downloads"),
             File(root, "Documents"),
             File(root, "DCIM"),
+            File(root, "DCIM/Camera"),
             File(root, "Pictures"),
+            File(root, "Pictures/Screenshots"),
             File(root, "Movies"),
-            File(root, "Music"),
-            File(root, "WhatsApp/Media"),
-            File(root, "Android/media/com.whatsapp/WhatsApp/Media"),
-            File(root, "Telegram")
+            File(root, "Music")
         )
 
         for (folder in targetFolders) {
-            if (folder.exists() && folder.isDirectory) {
-                try {
-                    folder.walkTopDown().maxDepth(5).forEach { file ->
-                        if (file.isFile && !visitedPaths.contains(file.absolutePath)) {
-                            visitedPaths.add(file.absolutePath)
-                            val ext = file.extension.lowercase()
-                            val category = when {
-                                documentExtensions.contains(ext) -> ViewCategory.DOCUMENTS
-                                archiveExtensions.contains(ext) -> ViewCategory.ARCHIVES
-                                apkExtensions.contains(ext) -> ViewCategory.APKS
-                                imageExtensions.contains(ext) -> ViewCategory.IMAGES
-                                videoExtensions.contains(ext) -> ViewCategory.VIDEOS
-                                audioExtensions.contains(ext) -> ViewCategory.AUDIO
-                                else -> null
+            if (!folder.exists() || !folder.isDirectory) continue
+            try {
+                val files = folder.listFiles() ?: continue
+                for (file in files) {
+                    if (file.isFile && !visitedPaths.contains(file.absolutePath)) {
+                        visitedPaths.add(file.absolutePath)
+                        val ext = file.extension.lowercase()
+                        val category = when {
+                            documentExtensions.contains(ext) -> ViewCategory.DOCUMENTS
+                            archiveExtensions.contains(ext) -> ViewCategory.ARCHIVES
+                            apkExtensions.contains(ext) -> ViewCategory.APKS
+                            imageExtensions.contains(ext) -> ViewCategory.IMAGES
+                            videoExtensions.contains(ext) -> ViewCategory.VIDEOS
+                            audioExtensions.contains(ext) -> ViewCategory.AUDIO
+                            else -> null
+                        }
+
+                        val isDownload = file.absolutePath.contains("/Download", ignoreCase = true)
+
+                        if (category != null || isDownload) {
+                            val item = FileItem(
+                                file = file,
+                                name = file.name,
+                                path = file.absolutePath,
+                                isDirectory = false,
+                                size = file.length(),
+                                lastModified = file.lastModified(),
+                                extension = ext,
+                                fileType = when (category) {
+                                    ViewCategory.DOCUMENTS -> FileType.DOCUMENT
+                                    ViewCategory.ARCHIVES -> FileType.ARCHIVE
+                                    ViewCategory.APKS -> FileType.APK
+                                    ViewCategory.IMAGES -> FileType.IMAGE
+                                    ViewCategory.VIDEOS -> FileType.VIDEO
+                                    ViewCategory.AUDIO -> FileType.AUDIO
+                                    else -> FileUtils.getFileType(file)
+                                },
+                                isHidden = file.isHidden || file.name.startsWith(".")
+                            )
+
+                            if (category != null) {
+                                categoryMap[category]?.add(item)
                             }
-
-                            val isDownload = file.absolutePath.contains("/Download/", ignoreCase = true) ||
-                                    file.absolutePath.contains("/Downloads/", ignoreCase = true)
-
-                            if (category != null || isDownload) {
-                                val item = FileItem(
-                                    file = file,
-                                    name = file.name,
-                                    path = file.absolutePath,
-                                    isDirectory = false,
-                                    size = file.length(),
-                                    lastModified = file.lastModified(),
-                                    extension = ext,
-                                    fileType = when (category) {
-                                        ViewCategory.DOCUMENTS -> FileType.DOCUMENT
-                                        ViewCategory.ARCHIVES -> FileType.ARCHIVE
-                                        ViewCategory.APKS -> FileType.APK
-                                        ViewCategory.IMAGES -> FileType.IMAGE
-                                        ViewCategory.VIDEOS -> FileType.VIDEO
-                                        ViewCategory.AUDIO -> FileType.AUDIO
-                                        else -> FileUtils.getFileType(file)
-                                    },
-                                    isHidden = file.isHidden || file.name.startsWith(".")
-                                )
-
-                                if (category != null) {
-                                    categoryMap[category]?.add(item)
-                                }
-                                if (isDownload) {
-                                    categoryMap[ViewCategory.DOWNLOADS]?.add(item)
-                                }
+                            if (isDownload) {
+                                categoryMap[ViewCategory.DOWNLOADS]?.add(item)
                             }
                         }
                     }
-                } catch (e: Throwable) {
-                    e.printStackTrace()
                 }
+            } catch (e: Throwable) {
+                e.printStackTrace()
             }
         }
     }

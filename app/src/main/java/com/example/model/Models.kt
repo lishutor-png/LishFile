@@ -157,3 +157,13 @@ data class TransferItem(
     val timestamp: Long = System.currentTimeMillis(),
     val isCompleted: Boolean = true
 )
+
+data class CategoryFolderBucket(
+    val folder: File,
+    val folderName: String,
+    val displayPath: String,
+    val files: List<FileItem>,
+    val fileCount: Int = files.size,
+    val totalSize: Long = files.sumOf { it.size },
+    val previewFile: FileItem? = files.firstOrNull()
+)

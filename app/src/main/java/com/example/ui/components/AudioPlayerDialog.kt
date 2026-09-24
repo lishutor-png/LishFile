@@ -12,6 +12,8 @@ import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,16 +33,34 @@ import java.util.Locale
 
 @Composable
 fun AudioPlayerDialog(
-    file: File,
+    initialFile: File,
+    audioList: List<File> = listOf(initialFile),
     onDismiss: () -> Unit
 ) {
+    val actualList = remember(audioList, initialFile) {
+        if (audioList.isNotEmpty() && audioList.contains(initialFile)) audioList else listOf(initialFile)
+    }
+
+    var currentIndex by remember {
+        mutableStateOf(actualList.indexOf(initialFile).coerceAtLeast(0))
+    }
+
+    val currentFile = actualList.getOrElse(currentIndex) { initialFile }
+
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
     var currentPosition by remember { mutableStateOf(0) }
     var duration by remember { mutableStateOf(0) }
     var isReady by remember { mutableStateOf(false) }
 
-    DisposableEffect(file) {
+    fun playTrack(file: File) {
+        try {
+            mediaPlayer?.stop()
+            mediaPlayer?.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         val player = MediaPlayer()
         try {
             player.setDataSource(file.absolutePath)
@@ -57,12 +77,21 @@ fun AudioPlayerDialog(
         player.setOnCompletionListener {
             isPlaying = false
             currentPosition = duration
+            // Auto play next track if available
+            if (currentIndex < actualList.size - 1) {
+                currentIndex++
+            }
         }
+    }
+
+    DisposableEffect(currentFile) {
+        playTrack(currentFile)
 
         onDispose {
             try {
-                if (player.isPlaying) player.stop()
-                player.release()
+                mediaPlayer?.stop()
+                mediaPlayer?.release()
+                mediaPlayer = null
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -106,12 +135,20 @@ fun AudioPlayerDialog(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Pemutar Audio",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Pemutar Musik",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (actualList.size > 1) {
+                            Text(
+                                text = "Lagu ${currentIndex + 1} dari ${actualList.size}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Default.Close, contentDescription = "Tutup")
                     }
@@ -138,29 +175,30 @@ fun AudioPlayerDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = file.name,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
+                    text = currentFile.nameWithoutExtension,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth()
                 )
 
                 Text(
-                    text = "${FileUtils.formatFileSize(file.length())} • ${file.extension.uppercase()}",
+                    text = "${currentFile.extension.uppercase()} • ${FileUtils.formatFileSize(currentFile.length())}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                // Seekbar
+                // Progress Bar Slider
                 Slider(
-                    value = if (duration > 0) currentPosition.toFloat() / duration else 0f,
+                    value = if (duration > 0) currentPosition.toFloat() / duration.toFloat() else 0f,
                     onValueChange = { frac ->
-                        val targetMs = (frac * duration).toInt()
-                        currentPosition = targetMs
-                        mediaPlayer?.seekTo(targetMs)
+                        val target = (frac * duration).toInt()
+                        mediaPlayer?.seekTo(target)
+                        currentPosition = target
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -183,36 +221,60 @@ fun AudioPlayerDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Controls: -10s, Play/Pause, +10s
+                // Playback Controls with Next and Previous Song buttons!
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Previous Track (⏮)
+                    IconButton(
+                        onClick = {
+                            if (currentIndex > 0) {
+                                currentIndex--
+                            }
+                        },
+                        enabled = currentIndex > 0
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SkipPrevious,
+                            contentDescription = "Lagu Sebelumnya",
+                            modifier = Modifier.size(32.dp),
+                            tint = if (currentIndex > 0) MaterialTheme.colorScheme.primary else Color.Gray
+                        )
+                    }
+
+                    // Rewind 10s
                     IconButton(
                         onClick = {
                             val newPos = (currentPosition - 10000).coerceAtLeast(0)
-                            currentPosition = newPos
                             mediaPlayer?.seekTo(newPos)
-                        },
-                        enabled = isReady
+                            currentPosition = newPos
+                        }
                     ) {
-                        Icon(Icons.Default.FastRewind, contentDescription = "Mundur 10 detik")
+                        Icon(
+                            Icons.Default.FastRewind,
+                            contentDescription = "Mundur 10 dtk",
+                            modifier = Modifier.size(24.dp)
+                        )
                     }
 
-                    FilledIconButton(
+                    // Play / Pause FAB
+                    FloatingActionButton(
                         onClick = {
-                            mediaPlayer?.let { player ->
+                            mediaPlayer?.let { p ->
                                 if (isPlaying) {
-                                    player.pause()
+                                    p.pause()
                                     isPlaying = false
                                 } else {
-                                    player.start()
+                                    p.start()
                                     isPlaying = true
                                 }
                             }
                         },
-                        modifier = Modifier.size(56.dp),
-                        enabled = isReady
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(56.dp)
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -221,15 +283,36 @@ fun AudioPlayerDialog(
                         )
                     }
 
+                    // Fast Forward 10s
                     IconButton(
                         onClick = {
                             val newPos = (currentPosition + 10000).coerceAtMost(duration)
-                            currentPosition = newPos
                             mediaPlayer?.seekTo(newPos)
-                        },
-                        enabled = isReady
+                            currentPosition = newPos
+                        }
                     ) {
-                        Icon(Icons.Default.FastForward, contentDescription = "Maju 10 detik")
+                        Icon(
+                            Icons.Default.FastForward,
+                            contentDescription = "Maju 10 dtk",
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    // Next Track (⏭)
+                    IconButton(
+                        onClick = {
+                            if (currentIndex < actualList.size - 1) {
+                                currentIndex++
+                            }
+                        },
+                        enabled = currentIndex < actualList.size - 1
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SkipNext,
+                            contentDescription = "Lagu Berikutnya",
+                            modifier = Modifier.size(32.dp),
+                            tint = if (currentIndex < actualList.size - 1) MaterialTheme.colorScheme.primary else Color.Gray
+                        )
                     }
                 }
             }
