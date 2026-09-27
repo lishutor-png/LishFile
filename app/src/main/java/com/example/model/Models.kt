@@ -84,9 +84,11 @@ data class CategoryOverviewStats(
 )
 
 enum class DuplicateScopeType {
+    ALL_STORAGES,
+    ENTIRE_STORAGE,
+    EXTERNAL_STORAGE,
     CURRENT_FOLDER,
-    SELECTED_FOLDERS,
-    ENTIRE_STORAGE
+    SELECTED_FOLDERS
 }
 
 data class DuplicateScanProgress(

@@ -870,6 +870,7 @@ fun FileManagerScreen(
         DuplicateScannerDialog(
             currentDir = currentDir,
             storageRoot = rootDir,
+            availableStorages = availableStorages,
             result = duplicateResult,
             onStartScan = { folders, desc -> viewModel.scanDuplicates(folders, desc) },
             onCancelScan = { viewModel.cancelDuplicateScan() },

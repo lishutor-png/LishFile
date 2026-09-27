@@ -2,7 +2,6 @@ package com.example.ui.components
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -37,6 +36,7 @@ import java.io.File
 fun DuplicateScannerDialog(
     currentDir: File,
     storageRoot: File,
+    availableStorages: List<StorageVolumeInfo> = emptyList(),
     result: DuplicateScanResult,
     onStartScan: (targetFolders: List<File>, scopeDesc: String) -> Unit,
     onCancelScan: () -> Unit = {},
@@ -49,7 +49,32 @@ fun DuplicateScannerDialog(
     onOpenFile: ((File) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
-    var selectedScope by remember { mutableStateOf(DuplicateScopeType.ENTIRE_STORAGE) }
+    // Determine primary and external storage volumes
+    val primaryStorage = remember(availableStorages, storageRoot) {
+        availableStorages.firstOrNull { it.isPrimary }
+            ?: availableStorages.firstOrNull()
+            ?: StorageVolumeInfo(
+                name = "Penyimpanan Internal",
+                rootDir = storageRoot,
+                totalSpace = storageRoot.totalSpace,
+                freeSpace = storageRoot.freeSpace,
+                isPrimary = true,
+                isRemovable = false
+            )
+    }
+
+    val externalStorages = remember(availableStorages, primaryStorage) {
+        availableStorages.filter { it.rootDir.absolutePath != primaryStorage.rootDir.absolutePath }
+    }
+
+    val hasExternalStorage = externalStorages.isNotEmpty()
+
+    var selectedScope by remember {
+        mutableStateOf(
+            if (hasExternalStorage) DuplicateScopeType.ALL_STORAGES else DuplicateScopeType.ENTIRE_STORAGE
+        )
+    }
+    var selectedExternalVolume by remember { mutableStateOf<StorageVolumeInfo?>(externalStorages.firstOrNull()) }
     var selectedPopularFolder by remember { mutableStateOf<String?>(null) }
     val selectedMultipleFolders = remember { mutableStateListOf<File>() }
     var showConfirmDeleteDialog by remember { mutableStateOf(false) }
@@ -57,50 +82,6 @@ fun DuplicateScannerDialog(
     // Search query & category filter inside results
     var resultsSearchQuery by remember { mutableStateOf("") }
     var selectedCategoryFilter by remember { mutableStateOf<FileType?>(null) }
-
-    // List of accessible top-level folders in root storage
-    val commonFolders = remember(storageRoot) {
-        storageRoot.listFiles()?.filter {
-            it.isDirectory && !FileUtils.isHiddenOrInHiddenFolder(it)
-        }?.sortedBy { it.name.lowercase() } ?: emptyList()
-    }
-
-    // Popular candidate directories
-    val popularFolderItems = remember(storageRoot) {
-        val candidates = listOf(
-            Triple("Download", Icons.Default.Download, Color(0xFF0288D1)),
-            Triple("DCIM", Icons.Default.PhotoCamera, Color(0xFF2E7D32)),
-            Triple("Pictures", Icons.Default.Image, Color(0xFFEF6C00)),
-            Triple("WhatsApp", Icons.Default.Chat, Color(0xFF00897B)),
-            Triple("Documents", Icons.Default.Description, Color(0xFF5E35B1)),
-            Triple("Music", Icons.Default.Audiotrack, Color(0xFFD81B60)),
-            Triple("Movies", Icons.Default.Videocam, Color(0xFFE53935))
-        )
-        candidates.mapNotNull { (name, icon, color) ->
-            val dir = File(storageRoot, name)
-            if (dir.exists() && dir.isDirectory) {
-                PopularFolderMeta(name, dir, icon, color)
-            } else null
-        }
-    }
-
-    // Selected files count & total freed space
-    val selectedFilesCount = remember(result.duplicateGroups) {
-        result.duplicateGroups.sumOf { group ->
-            group.files.count { it.isSelectedForDelete }
-        }
-    }
-
-    val selectedBytesFreed = remember(result.duplicateGroups) {
-        result.duplicateGroups.sumOf { group ->
-            val count = group.files.count { it.isSelectedForDelete }
-            count * group.fileSize
-        }
-    }
-
-    val totalCopiesCount = remember(result.duplicateGroups) {
-        result.duplicateGroups.sumOf { (it.files.size - 1).coerceAtLeast(0) }
-    }
 
     // Filter duplicate groups by search query & file type category
     val filteredDuplicateGroups = remember(result.duplicateGroups, resultsSearchQuery, selectedCategoryFilter) {
@@ -121,6 +102,24 @@ fun DuplicateScannerDialog(
             }
             matchesCategory && matchesSearch
         }
+    }
+
+    // Selected files count & total freed space
+    val selectedFilesCount = remember(result.duplicateGroups) {
+        result.duplicateGroups.sumOf { group ->
+            group.files.count { it.isSelectedForDelete }
+        }
+    }
+
+    val selectedBytesFreed = remember(result.duplicateGroups) {
+        result.duplicateGroups.sumOf { group ->
+            val count = group.files.count { it.isSelectedForDelete }
+            count * group.fileSize
+        }
+    }
+
+    val totalCopiesCount = remember(result.duplicateGroups) {
+        result.duplicateGroups.sumOf { (it.files.size - 1).coerceAtLeast(0) }
     }
 
     Dialog(
@@ -193,6 +192,7 @@ fun DuplicateScannerDialog(
                             ScanResultsView(
                                 result = result,
                                 filteredGroups = filteredDuplicateGroups,
+                                availableStorages = availableStorages,
                                 selectedFilesCount = selectedFilesCount,
                                 selectedBytesFreed = selectedBytesFreed,
                                 totalCopiesCount = totalCopiesCount,
@@ -212,11 +212,12 @@ fun DuplicateScannerDialog(
                         else -> {
                             LocationSelectionView(
                                 currentDir = currentDir,
-                                storageRoot = storageRoot,
-                                commonFolders = commonFolders,
-                                popularFolderItems = popularFolderItems,
+                                primaryStorage = primaryStorage,
+                                externalStorages = externalStorages,
                                 selectedScope = selectedScope,
                                 onScopeSelected = { selectedScope = it },
+                                selectedExternalVolume = selectedExternalVolume,
+                                onExternalVolumeSelected = { selectedExternalVolume = it },
                                 selectedPopularFolder = selectedPopularFolder,
                                 onPopularFolderSelected = { selectedPopularFolder = it },
                                 selectedMultipleFolders = selectedMultipleFolders,
@@ -231,7 +232,7 @@ fun DuplicateScannerDialog(
         }
     }
 
-    // Safety Confirmation Dialog before permanent deletion
+    // Safety Confirmation Dialog before deletion
     if (showConfirmDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showConfirmDeleteDialog = false },
@@ -268,7 +269,7 @@ fun DuplicateScannerDialog(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "• File asli (salinan yang tidak dicentang) tetap aman tersimpan.\n• Salinan redundant yang Anda pilih akan dihapus dari memori untuk membebaskan ruang penyimpanan.",
+                        text = "• File asli (salinan yang tidak dicentang) tetap aman tersimpan di memori internal maupun kartu SD.\n• Salinan redundant yang Anda centang akan dibersihkan dari penyimpanan.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -360,9 +361,9 @@ private fun DuplicateScannerTopBar(
                 )
                 Text(
                     text = when {
-                        isScanning -> "Sedang memindai & menghitung hash..."
+                        isScanning -> "Sedang memindai memori & menghitung hash..."
                         hasCompletedScan -> "Hasil temuan & pembersihan file ganda"
-                        else -> "Pilih lokasi & cari file ganda"
+                        else -> "Mendukung memori internal & kartu SD eksternal"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -458,21 +459,56 @@ private fun StepChip(
 }
 
 /**
- * Step 1: Location Selection
+ * Step 1: Location Selection with Full Support for External SD Cards
  */
 @Composable
 private fun LocationSelectionView(
     currentDir: File,
-    storageRoot: File,
-    commonFolders: List<File>,
-    popularFolderItems: List<PopularFolderMeta>,
+    primaryStorage: StorageVolumeInfo,
+    externalStorages: List<StorageVolumeInfo>,
     selectedScope: DuplicateScopeType,
     onScopeSelected: (DuplicateScopeType) -> Unit,
+    selectedExternalVolume: StorageVolumeInfo?,
+    onExternalVolumeSelected: (StorageVolumeInfo?) -> Unit,
     selectedPopularFolder: String?,
     onPopularFolderSelected: (String?) -> Unit,
     selectedMultipleFolders: MutableList<File>,
     onStartScan: (List<File>, String) -> Unit
 ) {
+    // Top-level folders in primary and external
+    val primaryFolders = remember(primaryStorage) {
+        primaryStorage.rootDir.listFiles()?.filter {
+            it.isDirectory && !FileUtils.isHiddenOrInHiddenFolder(it)
+        }?.sortedBy { it.name.lowercase() } ?: emptyList()
+    }
+
+    val externalFolders = remember(selectedExternalVolume) {
+        selectedExternalVolume?.rootDir?.listFiles()?.filter {
+            it.isDirectory && !FileUtils.isHiddenOrInHiddenFolder(it)
+        }?.sortedBy { it.name.lowercase() } ?: emptyList()
+    }
+
+    var selectedFolderTab by remember { mutableIntStateOf(0) }
+
+    // Popular candidate folders in primary
+    val popularFolderItems = remember(primaryStorage) {
+        val candidates = listOf(
+            Triple("Download", Icons.Default.Download, Color(0xFF0288D1)),
+            Triple("DCIM", Icons.Default.PhotoCamera, Color(0xFF2E7D32)),
+            Triple("Pictures", Icons.Default.Image, Color(0xFFEF6C00)),
+            Triple("WhatsApp", Icons.Default.Chat, Color(0xFF00897B)),
+            Triple("Documents", Icons.Default.Description, Color(0xFF5E35B1)),
+            Triple("Music", Icons.Default.Audiotrack, Color(0xFFD81B60)),
+            Triple("Movies", Icons.Default.Videocam, Color(0xFFE53935))
+        )
+        candidates.mapNotNull { (name, icon, color) ->
+            val dir = File(primaryStorage.rootDir, name)
+            if (dir.exists() && dir.isDirectory) {
+                PopularFolderMeta(name, dir, icon, color)
+            } else null
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -483,7 +519,7 @@ private fun LocationSelectionView(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
                 Text(
@@ -493,14 +529,99 @@ private fun LocationSelectionView(
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "Pilih seluruh penyimpanan atau folder tertentu untuk memindai berkas duplikat.",
+                    text = "Tentukan cakupan pemindaian berkas duplikat. Mendukung memori internal dan kartu SD eksternal.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp)
                 )
             }
 
-            // Option 1: Entire Internal Storage Card
+            // Option 1: ALL STORAGES (Internal + External SD Card)
+            if (externalStorages.isNotEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onScopeSelected(DuplicateScopeType.ALL_STORAGES)
+                                onPopularFolderSelected(null)
+                            },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (selectedScope == DuplicateScopeType.ALL_STORAGES) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            }
+                        ),
+                        border = if (selectedScope == DuplicateScopeType.ALL_STORAGES) {
+                            CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary))
+                        } else null
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (selectedScope == DuplicateScopeType.ALL_STORAGES) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.size(46.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Storage,
+                                        contentDescription = null,
+                                        tint = if (selectedScope == DuplicateScopeType.ALL_STORAGES) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "Semua Penyimpanan (Internal + Kartu SD)",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (selectedScope == DuplicateScopeType.ALL_STORAGES) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                                        modifier = Modifier.padding(2.dp)
+                                    ) {
+                                        Text(
+                                            text = "Maksimal",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Pindai internal (${FileUtils.formatFileSize(primaryStorage.totalSpace)}) dan ${externalStorages.size} kartu SD eksternal sekaligus",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (selectedScope == DuplicateScopeType.ALL_STORAGES) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            RadioButton(
+                                selected = selectedScope == DuplicateScopeType.ALL_STORAGES,
+                                onClick = {
+                                    onScopeSelected(DuplicateScopeType.ALL_STORAGES)
+                                    onPopularFolderSelected(null)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Option 2: Internal Storage Only
             item {
                 Card(
                     modifier = Modifier
@@ -543,31 +664,15 @@ private fun LocationSelectionView(
                         }
                         Spacer(modifier = Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "Seluruh Penyimpanan Internal",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (selectedScope == DuplicateScopeType.ENTIRE_STORAGE) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                                    modifier = Modifier.padding(2.dp)
-                                ) {
-                                    Text(
-                                        text = "Rekomendasi",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontSize = 10.sp,
-                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
-                                }
-                            }
+                            Text(
+                                text = "Penyimpanan Internal Saja",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (selectedScope == DuplicateScopeType.ENTIRE_STORAGE) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                            )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "Pindai seluruh berkas di memori perangkat untuk pembersihan maksimal",
+                                text = "${FileUtils.formatFileSize(primaryStorage.freeSpace)} bebas dari ${FileUtils.formatFileSize(primaryStorage.totalSpace)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (selectedScope == DuplicateScopeType.ENTIRE_STORAGE) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -583,7 +688,99 @@ private fun LocationSelectionView(
                 }
             }
 
-            // Option 2: Current Directory Card
+            // Option 3: External Storage (SD Card / USB Storage)
+            if (externalStorages.isNotEmpty()) {
+                externalStorages.forEach { extStorage ->
+                    item {
+                        val isSelected = selectedScope == DuplicateScopeType.EXTERNAL_STORAGE && selectedExternalVolume?.rootDir?.absolutePath == extStorage.rootDir.absolutePath
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onScopeSelected(DuplicateScopeType.EXTERNAL_STORAGE)
+                                    onExternalVolumeSelected(extStorage)
+                                    onPopularFolderSelected(null)
+                                },
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSelected) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                }
+                            ),
+                            border = if (isSelected) {
+                                CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary))
+                            } else null
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                    modifier = Modifier.size(46.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Default.SdCard,
+                                            contentDescription = null,
+                                            tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(26.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(14.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = extStorage.name,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = MaterialTheme.colorScheme.secondaryContainer,
+                                            modifier = Modifier.padding(2.dp)
+                                        ) {
+                                            Text(
+                                                text = "Eksternal",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "${extStorage.rootDir.absolutePath} • ${FileUtils.formatFileSize(extStorage.totalSpace)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                RadioButton(
+                                    selected = isSelected,
+                                    onClick = {
+                                        onScopeSelected(DuplicateScopeType.EXTERNAL_STORAGE)
+                                        onExternalVolumeSelected(extStorage)
+                                        onPopularFolderSelected(null)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Option 4: Current Folder Card
             item {
                 Card(
                     modifier = Modifier
@@ -652,7 +849,7 @@ private fun LocationSelectionView(
                 }
             }
 
-            // Option 3: Popular Fast Locations (Grid of Quick Chips/Cards)
+            // Option 5: Quick Popular Folders
             if (popularFolderItems.isNotEmpty()) {
                 item {
                     Text(
@@ -661,13 +858,6 @@ private fun LocationSelectionView(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                     )
-                    Text(
-                        text = "Ketuk salah satu folder umum yang sering menyimpan salinan berkas ganda:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -704,7 +894,7 @@ private fun LocationSelectionView(
                 }
             }
 
-            // Option 4: Custom Multiple Folders
+            // Option 6: Custom Multiple Folders Selection (With tabs for Internal and SD Card)
             item {
                 Card(
                     modifier = Modifier
@@ -712,8 +902,8 @@ private fun LocationSelectionView(
                         .clickable {
                             onScopeSelected(DuplicateScopeType.SELECTED_FOLDERS)
                             onPopularFolderSelected(null)
-                            if (selectedMultipleFolders.isEmpty() && commonFolders.isNotEmpty()) {
-                                commonFolders.take(2).forEach { selectedMultipleFolders.add(it) }
+                            if (selectedMultipleFolders.isEmpty() && primaryFolders.isNotEmpty()) {
+                                primaryFolders.take(2).forEach { selectedMultipleFolders.add(it) }
                             }
                         },
                     shape = RoundedCornerShape(16.dp),
@@ -757,7 +947,7 @@ private fun LocationSelectionView(
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = if (selectedMultipleFolders.isEmpty()) "Centang beberapa folder untuk dipindai bersama" else "${selectedMultipleFolders.size} folder dipilih",
+                                    text = if (selectedMultipleFolders.isEmpty()) "Pilih folder dari memori internal maupun kartu SD" else "${selectedMultipleFolders.size} folder terpilih",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (selectedScope == DuplicateScopeType.SELECTED_FOLDERS) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -771,9 +961,32 @@ private fun LocationSelectionView(
                             )
                         }
 
-                        // Checklist inside Custom Folders option
+                        // Checklist inside Custom Folders option with tabs for Internal and SD Card
                         if (selectedScope == DuplicateScopeType.SELECTED_FOLDERS) {
                             Spacer(modifier = Modifier.height(12.dp))
+
+                            if (externalStorages.isNotEmpty()) {
+                                TabRow(
+                                    selectedTabIndex = selectedFolderTab,
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                                ) {
+                                    Tab(
+                                        selected = selectedFolderTab == 0,
+                                        onClick = { selectedFolderTab = 0 },
+                                        text = { Text("📱 Internal", fontSize = 12.sp) }
+                                    )
+                                    Tab(
+                                        selected = selectedFolderTab == 1,
+                                        onClick = { selectedFolderTab = 1 },
+                                        text = { Text("💾 Kartu SD", fontSize = 12.sp) }
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+
+                            val activeFolderList = if (selectedFolderTab == 1 && externalFolders.isNotEmpty()) externalFolders else primaryFolders
+
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -781,40 +994,53 @@ private fun LocationSelectionView(
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                LazyColumn(modifier = Modifier.padding(6.dp)) {
-                                    itemsIndexed(commonFolders) { _, folder ->
-                                        val isChecked = selectedMultipleFolders.contains(folder)
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable {
-                                                    if (isChecked) selectedMultipleFolders.remove(folder)
-                                                    else selectedMultipleFolders.add(folder)
-                                                }
-                                                .padding(vertical = 4.dp, horizontal = 6.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Checkbox(
-                                                checked = isChecked,
-                                                onCheckedChange = { check ->
-                                                    if (check) selectedMultipleFolders.add(folder)
-                                                    else selectedMultipleFolders.remove(folder)
-                                                }
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Icon(
-                                                Icons.Default.Folder,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                text = folder.name,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
+                                if (activeFolderList.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "Tidak ada folder yang dapat diakses",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                } else {
+                                    LazyColumn(modifier = Modifier.padding(6.dp)) {
+                                        itemsIndexed(activeFolderList) { _, folder ->
+                                            val isChecked = selectedMultipleFolders.contains(folder)
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        if (isChecked) selectedMultipleFolders.remove(folder)
+                                                        else selectedMultipleFolders.add(folder)
+                                                    }
+                                                    .padding(vertical = 4.dp, horizontal = 6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Checkbox(
+                                                    checked = isChecked,
+                                                    onCheckedChange = { check ->
+                                                        if (check) selectedMultipleFolders.add(folder)
+                                                        else selectedMultipleFolders.remove(folder)
+                                                    }
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Icon(
+                                                    Icons.Default.Folder,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = folder.name,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -831,12 +1057,26 @@ private fun LocationSelectionView(
         Button(
             onClick = {
                 when (selectedScope) {
+                    DuplicateScopeType.ALL_STORAGES -> {
+                        val targets = mutableListOf<File>()
+                        targets.add(primaryStorage.rootDir)
+                        externalStorages.forEach { targets.add(it.rootDir) }
+                        onStartScan(targets, "Semua Penyimpanan (Internal + Kartu SD)")
+                    }
                     DuplicateScopeType.ENTIRE_STORAGE -> {
-                        onStartScan(listOf(storageRoot), "Seluruh Penyimpanan Internal")
+                        onStartScan(listOf(primaryStorage.rootDir), "Penyimpanan Internal")
+                    }
+                    DuplicateScopeType.EXTERNAL_STORAGE -> {
+                        val targetVolume = selectedExternalVolume ?: externalStorages.firstOrNull()
+                        if (targetVolume != null) {
+                            onStartScan(listOf(targetVolume.rootDir), targetVolume.name)
+                        } else {
+                            onStartScan(listOf(primaryStorage.rootDir), "Penyimpanan Internal")
+                        }
                     }
                     DuplicateScopeType.CURRENT_FOLDER -> {
                         if (selectedPopularFolder != null) {
-                            val targetDir = File(storageRoot, selectedPopularFolder)
+                            val targetDir = File(primaryStorage.rootDir, selectedPopularFolder)
                             onStartScan(listOf(targetDir), "Folder $selectedPopularFolder")
                         } else {
                             onStartScan(listOf(currentDir), "Folder: ${currentDir.name}")
@@ -846,7 +1086,7 @@ private fun LocationSelectionView(
                         val targets = if (selectedMultipleFolders.isNotEmpty()) {
                             selectedMultipleFolders.toList()
                         } else {
-                            listOf(storageRoot)
+                            listOf(primaryStorage.rootDir)
                         }
                         onStartScan(targets, "${targets.size} Folder Terpilih")
                     }
@@ -1098,12 +1338,13 @@ private fun ProgressFlowRow(
 }
 
 /**
- * Step 3: Scan Results & Cleanup
+ * Step 3: Scan Results & Cleanup with Storage Badges (Internal / SD Card)
  */
 @Composable
 private fun ScanResultsView(
     result: DuplicateScanResult,
     filteredGroups: List<DuplicateGroup>,
+    availableStorages: List<StorageVolumeInfo>,
     selectedFilesCount: Int,
     selectedBytesFreed: Long,
     totalCopiesCount: Int,
@@ -1120,7 +1361,7 @@ private fun ScanResultsView(
     onRequestClean: () -> Unit
 ) {
     if (result.duplicateGroups.isEmpty()) {
-        // Clean / Empty State
+        // Clean State
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1343,6 +1584,7 @@ private fun ScanResultsView(
                     DuplicateGroupCard(
                         groupIndex = groupIndex + 1,
                         group = group,
+                        availableStorages = availableStorages,
                         onToggleSelect = onToggleSelect,
                         onOpenFile = onOpenFile
                     )
@@ -1413,6 +1655,7 @@ private fun ScanResultsView(
 private fun DuplicateGroupCard(
     groupIndex: Int,
     group: DuplicateGroup,
+    availableStorages: List<StorageVolumeInfo>,
     onToggleSelect: (checksum: String, path: String) -> Unit,
     onOpenFile: ((File) -> Unit)?
 ) {
@@ -1487,6 +1730,7 @@ private fun DuplicateGroupCard(
                     index = index,
                     item = item,
                     checksum = group.checksum,
+                    availableStorages = availableStorages,
                     onToggleSelect = onToggleSelect,
                     onOpenFile = onOpenFile
                 )
@@ -1500,6 +1744,7 @@ private fun DuplicateFileItemRow(
     index: Int,
     item: DuplicateFileItem,
     checksum: String,
+    availableStorages: List<StorageVolumeInfo>,
     onToggleSelect: (checksum: String, path: String) -> Unit,
     onOpenFile: ((File) -> Unit)?
 ) {
@@ -1509,6 +1754,16 @@ private fun DuplicateFileItemRow(
             fileType = item.fileType
         )
     )
+
+    // Detect if file is on external SD card or internal
+    val storageTag = remember(item.file.absolutePath, availableStorages) {
+        val extVolume = availableStorages.find { !it.isPrimary && item.file.absolutePath.startsWith(it.rootDir.absolutePath) }
+        if (extVolume != null) {
+            "💾 Kartu SD"
+        } else {
+            "📱 Internal"
+        }
+    }
 
     // Extract folder name nicely
     val folderName = remember(item.parentPath) {
@@ -1604,7 +1859,27 @@ private fun DuplicateFileItemRow(
 
             Spacer(modifier = Modifier.height(2.dp))
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Storage tag (Internal vs Kartu SD)
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = if (storageTag.contains("Kartu SD")) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Text(
+                        text = storageTag,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (storageTag.contains("Kartu SD")) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
                 Surface(
                     shape = RoundedCornerShape(4.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant

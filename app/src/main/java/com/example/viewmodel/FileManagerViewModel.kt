@@ -203,7 +203,45 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
                 isRemovable = false
             )
         )
-        // Check for secondary storage via context.getExternalFilesDirs
+
+        // 1. StorageManager API (official Android N+ / R+)
+        try {
+            val storageManager = context.getSystemService(android.content.Context.STORAGE_SERVICE) as? android.os.storage.StorageManager
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N && storageManager != null) {
+                storageManager.storageVolumes.forEach { volume ->
+                    val dir = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        volume.directory
+                    } else {
+                        try {
+                            val method = volume.javaClass.getMethod("getPathFile")
+                            method.invoke(volume) as? File
+                        } catch (e: Exception) {
+                            try {
+                                val method = volume.javaClass.getMethod("getPath")
+                                val path = method.invoke(volume) as? String
+                                if (path != null) File(path) else null
+                            } catch (e2: Exception) { null }
+                        }
+                    }
+                    if (dir != null && dir.exists() && volumes.none { it.rootDir.absolutePath == dir.absolutePath }) {
+                        val isPrimary = volume.isPrimary
+                        val name = if (isPrimary) "Penyimpanan Internal" else volume.getDescription(context) ?: "Kartu SD (${dir.name})"
+                        volumes.add(
+                            StorageVolumeInfo(
+                                name = name,
+                                rootDir = dir,
+                                totalSpace = dir.totalSpace,
+                                freeSpace = dir.freeSpace,
+                                isPrimary = isPrimary,
+                                isRemovable = volume.isRemovable
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 2. Check for secondary storage via context.getExternalFilesDirs
         try {
             context.getExternalFilesDirs(null).drop(1).forEachIndexed { index, file ->
                 if (file != null) {
@@ -216,7 +254,7 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
                         }
                         parent = parent.parentFile
                     }
-                    if (volumes.none { it.rootDir.absolutePath == root.absolutePath }) {
+                    if (root.exists() && volumes.none { it.rootDir.absolutePath == root.absolutePath }) {
                         volumes.add(
                             StorageVolumeInfo(
                                 name = "Kartu SD ${index + 1}",
@@ -232,7 +270,7 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
             }
         } catch (_: Exception) {}
 
-        // Check for secondary storage via /storage
+        // 3. Check for secondary storage via /storage
         try {
             val storageDir = File("/storage")
             if (storageDir.exists() && storageDir.isDirectory) {
@@ -243,6 +281,29 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
                             volumes.add(
                                 StorageVolumeInfo(
                                     name = name,
+                                    rootDir = dir,
+                                    totalSpace = dir.totalSpace,
+                                    freeSpace = dir.freeSpace,
+                                    isPrimary = false,
+                                    isRemovable = true
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 4. Check for /mnt mounts
+        try {
+            val mntDir = File("/mnt")
+            if (mntDir.exists() && mntDir.isDirectory) {
+                mntDir.listFiles()?.forEach { dir ->
+                    if (dir.isDirectory && (dir.name.contains("sdcard", ignoreCase = true) || dir.name.contains("media_rw", ignoreCase = true) || dir.name.contains("extSdCard", ignoreCase = true))) {
+                        if (volumes.none { it.rootDir.absolutePath == dir.absolutePath }) {
+                            volumes.add(
+                                StorageVolumeInfo(
+                                    name = "Memori Eksternal (${dir.name})",
                                     rootDir = dir,
                                     totalSpace = dir.totalSpace,
                                     freeSpace = dir.freeSpace,
@@ -871,14 +932,22 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
                             continue
                         }
 
+                        // Skip Android/data and Android/obb if restricted to prevent OS exceptions on both internal & external memory
+                        if (current.name.equals("data", ignoreCase = true) || current.name.equals("obb", ignoreCase = true)) {
+                            val parent = current.parentFile
+                            if (parent != null && parent.name.equals("Android", ignoreCase = true)) {
+                                continue
+                            }
+                        }
+
                         if (current.isFile) {
-                            val len = current.length()
+                            val len = try { current.length() } catch (e: Exception) { 0L }
                             if (len > 0L) {
                                 scannedFiles.add(current)
                                 fileMapBySize.getOrPut(len) { mutableListOf() }.add(current)
                             }
                         } else if (current.isDirectory) {
-                            val children = current.listFiles()
+                            val children = try { current.listFiles() } catch (e: Exception) { null }
                             if (children != null) {
                                 for (child in children) {
                                     if (!isActive) return@launch
@@ -888,7 +957,7 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
                                     if (child.isDirectory) {
                                         queue.add(child)
                                     } else if (child.isFile) {
-                                        val len = child.length()
+                                        val len = try { child.length() } catch (e: Exception) { 0L }
                                         if (len > 0L) {
                                             scannedFiles.add(child)
                                             fileMapBySize.getOrPut(len) { mutableListOf() }.add(child)
@@ -1060,9 +1129,22 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
                 val remainingFiles = mutableListOf<DuplicateFileItem>()
                 group.files.forEach { item ->
                     if (item.isSelectedForDelete) {
-                        if (item.file.delete()) {
+                        val deleted = try {
+                            if (item.file.delete()) true else FileUtils.deleteRecursive(item.file)
+                        } catch (e: Exception) {
+                            false
+                        }
+                        if (deleted) {
                             deletedCount++
                             freedBytes += group.fileSize
+                            try {
+                                android.media.MediaScannerConnection.scanFile(
+                                    context,
+                                    arrayOf(item.file.absolutePath),
+                                    null,
+                                    null
+                                )
+                            } catch (_: Exception) {}
                         } else {
                             remainingFiles.add(item)
                         }
