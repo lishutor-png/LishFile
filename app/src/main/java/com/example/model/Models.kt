@@ -89,11 +89,23 @@ enum class DuplicateScopeType {
     ENTIRE_STORAGE
 }
 
+data class DuplicateScanProgress(
+    val stage: String = "",
+    val filesScannedCount: Int = 0,
+    val candidateFilesCount: Int = 0,
+    val processedCandidatesCount: Int = 0,
+    val totalCandidatesCount: Int = 0
+)
+
 data class DuplicateScanResult(
     val duplicateGroups: List<DuplicateGroup> = emptyList(),
     val totalWastedBytes: Long = 0L,
     val isScanning: Boolean = false,
-    val scopeDescription: String = "Folder Saat Ini"
+    val scopeDescription: String = "Folder Saat Ini",
+    val progress: DuplicateScanProgress = DuplicateScanProgress(),
+    val hasCompletedScan: Boolean = false,
+    val freedBytesLastAction: Long = 0L,
+    val deletedCountLastAction: Int = 0
 )
 
 data class ZipEntryItem(
@@ -103,15 +115,21 @@ data class ZipEntryItem(
     val compressedSize: Long
 )
 
+data class DuplicateFileItem(
+    val file: File,
+    val name: String = file.name,
+    val path: String = file.absolutePath,
+    val parentPath: String = file.parent ?: "",
+    val size: Long = file.length(),
+    val lastModified: Long = file.lastModified(),
+    val fileType: FileType = FileType.OTHER,
+    val isSelectedForDelete: Boolean = false
+)
+
 data class DuplicateGroup(
     val checksum: String,
     val fileSize: Long,
     val files: List<DuplicateFileItem>
-)
-
-data class DuplicateFileItem(
-    val file: File,
-    val isSelectedForDelete: Boolean = false
 )
 
 data class StorageVolumeInfo(

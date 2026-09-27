@@ -11,6 +11,7 @@ import com.example.model.ClipboardItemState
 import com.example.model.DashboardCategoryType
 import com.example.model.DuplicateFileItem
 import com.example.model.DuplicateGroup
+import com.example.model.DuplicateScanProgress
 import com.example.model.DuplicateScanResult
 import com.example.model.FileItem
 import com.example.model.FileType
@@ -26,12 +27,14 @@ import com.example.transfer.LocalTransferServer
 import com.example.ui.theme.AppThemeMode
 import com.example.util.FileUtils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -823,51 +826,171 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    // Duplicate File Scanner (Supports Current Folder, Multiple Custom Folders, or Entire Storage)
-    fun scanDuplicates(targetFolders: List<File> = listOf(_currentDir.value), scopeDescription: String = "Folder Terpilih") {
-        viewModelScope.launch(Dispatchers.IO) {
-            _duplicateResult.value = DuplicateScanResult(isScanning = true, scopeDescription = scopeDescription)
-            val fileMap = mutableMapOf<Long, MutableList<File>>()
+    // Duplicate File Scanner (Follows user's flowchart: Select location -> Scan all files -> Group by size -> Unique size skips -> Candidate SHA-256 hash -> Group by hash -> Show results & potential savings -> Confirmation -> Delete & update)
+    private var duplicateScanJob: Job? = null
 
-            // Step 1: Group by file size across all designated target folders
-            targetFolders.forEach { folder ->
-                if (folder.exists() && folder.isDirectory) {
-                    folder.walkTopDown().maxDepth(5).forEach { file ->
-                        if (file.isFile && file.length() > 0) {
-                            val size = file.length()
-                            fileMap.getOrPut(size) { mutableListOf() }.add(file)
+    fun resetDuplicateScan() {
+        duplicateScanJob?.cancel()
+        _duplicateResult.value = DuplicateScanResult()
+    }
+
+    fun cancelDuplicateScan() {
+        duplicateScanJob?.cancel()
+        _duplicateResult.value = DuplicateScanResult()
+    }
+
+    fun scanDuplicates(targetFolders: List<File> = listOf(_currentDir.value), scopeDescription: String = "Folder Terpilih") {
+        duplicateScanJob?.cancel()
+        duplicateScanJob = viewModelScope.launch(Dispatchers.IO) {
+            val showHidden = preferences.showHiddenFiles.value
+            _duplicateResult.value = DuplicateScanResult(
+                isScanning = true,
+                scopeDescription = scopeDescription,
+                hasCompletedScan = false,
+                progress = DuplicateScanProgress(stage = "Membaca berkas yang dapat diakses...")
+            )
+
+            val scannedFiles = mutableListOf<File>()
+            val fileMapBySize = mutableMapOf<Long, MutableList<File>>()
+            val visitedDirs = mutableSetOf<String>()
+
+            // 1. Scan semua file yang bisa diakses pada lokasi yang dipilih
+            targetFolders.forEach { root ->
+                if (!isActive) return@launch
+                if (root.exists()) {
+                    val queue = ArrayDeque<File>()
+                    queue.add(root)
+
+                    while (queue.isNotEmpty() && isActive) {
+                        val current = queue.removeFirst()
+                        val canonicalPath = try { current.canonicalPath } catch (e: Exception) { current.absolutePath }
+                        if (canonicalPath in visitedDirs) continue
+                        visitedDirs.add(canonicalPath)
+
+                        if (!showHidden && FileUtils.isHiddenOrInHiddenFolder(current)) {
+                            continue
+                        }
+
+                        if (current.isFile) {
+                            val len = current.length()
+                            if (len > 0L) {
+                                scannedFiles.add(current)
+                                fileMapBySize.getOrPut(len) { mutableListOf() }.add(current)
+                            }
+                        } else if (current.isDirectory) {
+                            val children = current.listFiles()
+                            if (children != null) {
+                                for (child in children) {
+                                    if (!isActive) return@launch
+                                    if (!showHidden && FileUtils.isHiddenOrInHiddenFolder(child)) {
+                                        continue
+                                    }
+                                    if (child.isDirectory) {
+                                        queue.add(child)
+                                    } else if (child.isFile) {
+                                        val len = child.length()
+                                        if (len > 0L) {
+                                            scannedFiles.add(child)
+                                            fileMapBySize.getOrPut(len) { mutableListOf() }.add(child)
+                                            if (scannedFiles.size % 25 == 0) {
+                                                _duplicateResult.value = _duplicateResult.value.copy(
+                                                    progress = DuplicateScanProgress(
+                                                        stage = "Membaca berkas: ${scannedFiles.size} ditemukan...",
+                                                        filesScannedCount = scannedFiles.size
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            // Step 2: Compute hash for files with identical size
-            val potentialDuplicates = fileMap.filter { it.value.size > 1 }
+            if (!isActive) return@launch
+
+            // 2. Kelompokkan file berdasarkan ukuran (Ukuran unik? YA -> Lewati, TIDAK -> Kandidat duplikat)
+            val candidateGroupsBySize = fileMapBySize.filter { it.value.size > 1 }
+            val totalCandidateFiles = candidateGroupsBySize.values.sumOf { it.size }
+
+            _duplicateResult.value = _duplicateResult.value.copy(
+                progress = DuplicateScanProgress(
+                    stage = "Ditemukan $totalCandidateFiles kandidat berkas berukuran sama. Menghitung SHA-256...",
+                    filesScannedCount = scannedFiles.size,
+                    candidateFilesCount = totalCandidateFiles,
+                    totalCandidatesCount = totalCandidateFiles
+                )
+            )
+
+            // 3. Hitung SHA-256 kandidat duplikat
             val groups = mutableListOf<DuplicateGroup>()
             var totalWasted = 0L
+            var processedCandidates = 0
 
-            potentialDuplicates.forEach { (size, files) ->
+            candidateGroupsBySize.forEach { (size, files) ->
+                if (!isActive) return@launch
                 val hashMap = mutableMapOf<String, MutableList<File>>()
-                files.forEach { file ->
-                    val hash = AesCryptoEngine.calculateChecksum(file, "MD5")
+                for (file in files) {
+                    if (!isActive) return@launch
+                    val hash = AesCryptoEngine.calculateChecksum(file, "SHA-256")
+                    processedCandidates++
+                    if (processedCandidates % 5 == 0 || processedCandidates == totalCandidateFiles) {
+                        _duplicateResult.value = _duplicateResult.value.copy(
+                            progress = DuplicateScanProgress(
+                                stage = "Menghitung SHA-256: $processedCandidates / $totalCandidateFiles berkas...",
+                                filesScannedCount = scannedFiles.size,
+                                candidateFilesCount = totalCandidateFiles,
+                                processedCandidatesCount = processedCandidates,
+                                totalCandidatesCount = totalCandidateFiles
+                            )
+                        )
+                    }
                     if (hash.isNotEmpty()) {
                         hashMap.getOrPut(hash) { mutableListOf() }.add(file)
                     }
                 }
+
+                // 4. Hash sama? TIDAK -> Bukan duplikat; YA -> DUPLIKAT
+                // Kelompokkan berdasarkan hash
                 hashMap.filter { it.value.size > 1 }.forEach { (hash, dupList) ->
-                    val items = dupList.mapIndexed { index, file ->
-                        DuplicateFileItem(file = file, isSelectedForDelete = index > 0)
+                    val sortedList = dupList.sortedBy { it.lastModified() }
+                    val items = sortedList.mapIndexed { index, file ->
+                        DuplicateFileItem(
+                            file = file,
+                            name = file.name,
+                            path = file.absolutePath,
+                            parentPath = file.parent ?: "",
+                            size = size,
+                            lastModified = file.lastModified(),
+                            fileType = FileUtils.getFileType(file),
+                            isSelectedForDelete = index > 0
+                        )
                     }
                     groups.add(DuplicateGroup(checksum = hash, fileSize = size, files = items))
                     totalWasted += size * (dupList.size - 1)
                 }
             }
 
+            if (!isActive) return@launch
+
+            // Urutkan grup duplikat berdasarkan potensi pemborosan ruang terbesar
+            groups.sortByDescending { (it.files.size - 1) * it.fileSize }
+
             _duplicateResult.value = DuplicateScanResult(
                 duplicateGroups = groups,
                 totalWastedBytes = totalWasted,
                 isScanning = false,
-                scopeDescription = scopeDescription
+                scopeDescription = scopeDescription,
+                hasCompletedScan = true,
+                progress = DuplicateScanProgress(
+                    stage = "Pemindaian selesai",
+                    filesScannedCount = scannedFiles.size,
+                    candidateFilesCount = totalCandidateFiles,
+                    processedCandidatesCount = totalCandidateFiles,
+                    totalCandidatesCount = totalCandidateFiles
+                )
             )
         }
     }
@@ -887,18 +1010,84 @@ class FileManagerViewModel(application: Application) : AndroidViewModel(applicat
         _duplicateResult.value = current.copy(duplicateGroups = updatedGroups)
     }
 
+    fun selectSmartDuplicates() {
+        val current = _duplicateResult.value
+        val updatedGroups = current.duplicateGroups.map { group ->
+            val updatedFiles = group.files.mapIndexed { index, item ->
+                item.copy(isSelectedForDelete = index > 0)
+            }
+            group.copy(files = updatedFiles)
+        }
+        _duplicateResult.value = current.copy(duplicateGroups = updatedGroups)
+    }
+
+    fun selectNewestDuplicates() {
+        val current = _duplicateResult.value
+        val updatedGroups = current.duplicateGroups.map { group ->
+            val newestIndex = group.files.indices.maxByOrNull { group.files[it].lastModified } ?: (group.files.size - 1)
+            val updatedFiles = group.files.mapIndexed { index, item ->
+                item.copy(isSelectedForDelete = index != newestIndex)
+            }
+            group.copy(files = updatedFiles)
+        }
+        _duplicateResult.value = current.copy(duplicateGroups = updatedGroups)
+    }
+
+    fun selectAllDuplicates(selectAll: Boolean) {
+        val current = _duplicateResult.value
+        val updatedGroups = current.duplicateGroups.map { group ->
+            val updatedFiles = group.files.mapIndexed { index, item ->
+                if (selectAll) {
+                    item.copy(isSelectedForDelete = index > 0)
+                } else {
+                    item.copy(isSelectedForDelete = false)
+                }
+            }
+            group.copy(files = updatedFiles)
+        }
+        _duplicateResult.value = current.copy(duplicateGroups = updatedGroups)
+    }
+
     fun deleteSelectedDuplicates() {
         viewModelScope.launch(Dispatchers.IO) {
             val current = _duplicateResult.value
             var deletedCount = 0
+            var freedBytes = 0L
+
+            val updatedGroups = mutableListOf<DuplicateGroup>()
+
             current.duplicateGroups.forEach { group ->
-                group.files.filter { it.isSelectedForDelete }.forEach { item ->
-                    if (item.file.delete()) deletedCount++
+                val remainingFiles = mutableListOf<DuplicateFileItem>()
+                group.files.forEach { item ->
+                    if (item.isSelectedForDelete) {
+                        if (item.file.delete()) {
+                            deletedCount++
+                            freedBytes += group.fileSize
+                        } else {
+                            remainingFiles.add(item)
+                        }
+                    } else {
+                        remainingFiles.add(item)
+                    }
+                }
+                if (remainingFiles.size > 1) {
+                    updatedGroups.add(group.copy(files = remainingFiles))
                 }
             }
-            _duplicateResult.value = DuplicateScanResult()
+
+            val remainingWasted = updatedGroups.sumOf { (it.files.size - 1) * it.fileSize }
+
+            _duplicateResult.value = current.copy(
+                duplicateGroups = updatedGroups,
+                totalWastedBytes = remainingWasted,
+                freedBytesLastAction = freedBytes,
+                deletedCountLastAction = deletedCount
+            )
+
             refreshCurrentDir()
-            notifySnackbar("Berhasil membersihkan $deletedCount file duplikat")
+            refreshStorageStats()
+            refreshCategoryStats()
+            notifySnackbar("Berhasil membebaskan ${FileUtils.formatFileSize(freedBytes)} ($deletedCount berkas duplikat dibersihkan)")
         }
     }
 

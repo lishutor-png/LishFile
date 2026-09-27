@@ -272,8 +272,8 @@ fun FileManagerScreen(
                     isBrowsingFolder = true
                 },
                 onOpenDuplicates = {
+                    viewModel.resetDuplicateScan()
                     showDuplicateScanner = true
-                    viewModel.scanDuplicates()
                 },
                 onOpenRecentFolder = { folder ->
                     viewModel.navigateTo(folder)
@@ -754,8 +754,8 @@ fun FileManagerScreen(
                         SmallFloatingActionButton(
                             onClick = {
                                 showFabMenu = false
+                                viewModel.resetDuplicateScan()
                                 showDuplicateScanner = true
-                                viewModel.scanDuplicates()
                             },
                             containerColor = MaterialTheme.colorScheme.tertiaryContainer
                         ) {
@@ -872,12 +872,36 @@ fun FileManagerScreen(
             storageRoot = rootDir,
             result = duplicateResult,
             onStartScan = { folders, desc -> viewModel.scanDuplicates(folders, desc) },
+            onCancelScan = { viewModel.cancelDuplicateScan() },
             onToggleSelect = { checksum, path -> viewModel.toggleDuplicateSelection(checksum, path) },
-            onCleanDuplicates = {
-                viewModel.deleteSelectedDuplicates()
-                showDuplicateScanner = false
+            onSelectSmartDuplicates = { viewModel.selectSmartDuplicates() },
+            onSelectNewestDuplicates = { viewModel.selectNewestDuplicates() },
+            onSelectAllDuplicates = { selectAll -> viewModel.selectAllDuplicates(selectAll) },
+            onCleanDuplicates = { viewModel.deleteSelectedDuplicates() },
+            onResetScan = { viewModel.resetDuplicateScan() },
+            onOpenFile = { file ->
+                val item = FileItem(file = file, fileType = FileUtils.getFileType(file))
+                handleFileClick(
+                    context = context,
+                    item = item,
+                    coroutineScope = coroutineScope,
+                    viewModel = viewModel,
+                    onViewImage = { viewingImageFile = it },
+                    onPlayAudio = { playingAudioFile = it },
+                    onPlayVideo = { playingVideoFile = it },
+                    onViewPdf = { viewingPdfFile = it },
+                    onPreviewZip = { previewingZipFile = it },
+                    onEditText = { f, content ->
+                        editingTextFile = f
+                        editingTextContent = content
+                    },
+                    onEditImage = { f -> editingImageFile = f }
+                )
             },
-            onDismiss = { showDuplicateScanner = false }
+            onDismiss = {
+                showDuplicateScanner = false
+                viewModel.resetDuplicateScan()
+            }
         )
     }
 
